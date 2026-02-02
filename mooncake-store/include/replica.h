@@ -435,10 +435,11 @@ inline Replica::Descriptor Replica::get_descriptor() const {
         desc.descriptor_variant = std::move(disk_desc);
     } else if (is_local_disk_replica()) {
         const auto& disk_data = std::get<LocalDiskReplicaData>(data_);
-        LocalDiskDescriptor local_disk_desc;
-        local_disk_desc.client_id = disk_data.client_id;
-        local_disk_desc.object_size = disk_data.object_size;
-        local_disk_desc.transport_endpoint = disk_data.transport_endpoint;
+        LocalDiskDescriptor local_disk_desc{
+            disk_data.client_id,
+            disk_data.object_size,
+            disk_data.transport_endpoint,
+        };
         desc.descriptor_variant = std::move(local_disk_desc);
     }
 

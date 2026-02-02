@@ -3,12 +3,15 @@
 
 #include <glog/logging.h>
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <thread>
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 
-#include "types.h"
+#include "hot_standby_service.h"
 #include "master_config.h"
+#include "types.h"
 
 namespace mooncake {
 
@@ -23,7 +26,18 @@ class MasterViewHelper {
    public:
     MasterViewHelper(const MasterViewHelper&) = delete;
     MasterViewHelper& operator=(const MasterViewHelper&) = delete;
-    MasterViewHelper();
+    // cluster_id source of truth:
+    // - If provided, use it.
+    // - Else fall back to env MC_STORE_CLUSTER_ID.
+    // - Else fall back to DEFAULT_CLUSTER_ID.
+    explicit MasterViewHelper(const std::string& cluster_id = std::string());
+
+    // Update cluster_id (and derived master_view_key_) before using the helper.
+    // This is mainly for client-side etcd:// usage where cluster_id may be passed
+    // via connection string.
+    void SetClusterId(const std::string& cluster_id);
+
+    const std::string& GetMasterViewKey() const { return master_view_key_; }
 
     /*
      * @brief Connect to the etcd cluster. This function should be called at
@@ -60,6 +74,7 @@ class MasterViewHelper {
                             ViewVersionId& version);
 
    private:
+    void BuildMasterViewKeyFromClusterId(const std::string& cluster_id);
     std::string master_view_key_;
 };
 
@@ -77,10 +92,27 @@ class MasterServiceSupervisor {
     ~MasterServiceSupervisor();
 
    private:
+    /**
+     * @brief Start HotStandbyService when there is an existing leader
+     * @param mv_helper MasterViewHelper instance
+     * @param current_leader Current leader address
+     */
+    void StartStandbyService(MasterViewHelper& mv_helper,
+                             const std::string& current_leader);
+
+    /**
+     * @brief Stop HotStandbyService
+     */
+    void StopStandbyService();
+
     // coro_rpc server thread
     std::thread server_thread_;
 
     MasterServiceSupervisorConfig config_;
+
+    // HotStandbyService for standby mode
+    std::unique_ptr<HotStandbyService> standby_service_;
+    std::atomic<bool> standby_running_{false};
 };
 
 }  // namespace mooncake

@@ -16,8 +16,6 @@ set(MOONCAKE_STORE_SOURCES
     ha_helper.cpp
     segment.cpp
     transfer_task.cpp
-    etcd_helper.cpp
-    ha_helper.cpp
     rpc_service.cpp
     offset_allocator.cpp
     posix_file.cpp
@@ -32,6 +30,13 @@ set(MOONCAKE_STORE_SOURCES
     utils/type_util.cpp
     utils/file_util.cpp
     task_manager.cpp
+    oplog_manager.cpp
+    etcd_oplog_store.cpp
+    oplog_watcher.cpp
+    oplog_applier.cpp
+    hot_standby_service.cpp
+    standby_state_machine.cpp
+    ha_metric_manager.cpp
 )
 
 set(EXTRA_LIBS "")
@@ -65,6 +70,15 @@ if(HAVE_AWS_SDK)
         add_definitions(-DHAVE_AWS_SDK)
     endif()
 endif()
+# Find xxHash (required for ComputeChecksum)
+find_path(XXHASH_INCLUDE_DIR NAMES xxhash.h PATHS /usr/include /usr/local/include)
+find_library(XXHASH_LIBRARY NAMES xxhash libxxhash PATHS /usr/lib /usr/local/lib /usr/lib64)
+if (XXHASH_INCLUDE_DIR AND XXHASH_LIBRARY)
+  message(STATUS "Found xxHash: include=${XXHASH_INCLUDE_DIR} lib=${XXHASH_LIBRARY}")
+  list(APPEND MASTER_EXTRA_INCS ${XXHASH_INCLUDE_DIR})
+else()
+  message(FATAL_ERROR "xxHash library/header not found. Please install xxhash (development headers) and try again.")
+endif()
 
 if(USE_3FS)
   add_subdirectory(hf3fs)
@@ -79,6 +93,8 @@ endif()
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
 add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
+target_include_directories(mooncake_store PUBLIC ${XXHASH_INCLUDE_DIR})
+target_link_libraries(mooncake_store PUBLIC ${XXHASH_LIBRARY})
 # Note: transfer_engine is PRIVATE to avoid propagating its dependencies (e.g., vendor-specific hardware)
 # to targets that don't need it (e.g., mooncake_master).
 # Targets that need transfer_engine should link it explicitly.
@@ -167,4 +183,18 @@ target_link_libraries(mooncake_client PRIVATE mooncake_store transfer_engine)
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_client snapshot_uploader_daemon DESTINATION bin)
+# Mock client simulator binary
+add_executable(mock_client mock_client_main.cpp)
+target_link_libraries(mock_client PRIVATE
+    mooncake_store
+    cachelib_memory_allocator
+    glog::glog
+    gflags::gflags
+    pthread
+)
+if (STORE_USE_ETCD)
+    add_dependencies(mock_client build_etcd_wrapper)
+    target_link_libraries(mock_client PRIVATE ${ETCD_WRAPPER_LIB})
+endif()
+
+install(TARGETS mooncake_master mooncake_client mock_client snapshot_uploader_daemon DESTINATION bin)

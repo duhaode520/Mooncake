@@ -175,7 +175,30 @@ tl::expected<void, ErrorCode> CheckRegisterMemoryParams(const void* addr,
 
 ErrorCode Client::ConnectToMaster(const std::string& master_server_entry) {
     if (master_server_entry.find("etcd://") == 0) {
+        // Support optional cluster_id in connection string:
+        //   etcd://<endpoints>?cluster_id=<cluster_id>
+        // If not provided, MasterViewHelper will fall back to env MC_STORE_CLUSTER_ID,
+        // then DEFAULT_CLUSTER_ID.
         std::string etcd_entry = master_server_entry.substr(strlen("etcd://"));
+        std::string cluster_id;
+        {
+            const size_t qpos = etcd_entry.find('?');
+            if (qpos != std::string::npos) {
+                const std::string query = etcd_entry.substr(qpos + 1);
+                etcd_entry = etcd_entry.substr(0, qpos);
+                const std::string k = "cluster_id=";
+                const size_t kpos = query.find(k);
+                if (kpos != std::string::npos) {
+                    const size_t vpos = kpos + k.size();
+                    size_t vend = query.find('&', vpos);
+                    if (vend == std::string::npos) vend = query.size();
+                    cluster_id = query.substr(vpos, vend - vpos);
+                }
+            }
+        }
+        if (!cluster_id.empty()) {
+            master_view_helper_.SetClusterId(cluster_id);
+        }
 
         // Get master address from etcd
         auto err = master_view_helper_.ConnectToEtcd(etcd_entry);
@@ -1807,6 +1830,10 @@ void Client::PingThreadMain(bool is_ha_mode,
     // Increment after a ping failure, reset after a ping success
     int ping_fail_count = 0;
 
+    // Track the last known view version to detect master changes in HA mode
+    ViewVersionId last_known_view_version = 0;
+    bool is_first_ping = true;
+
     auto remount_segment = [this]() {
         // This lock must be held until the remount rpc is finished,
         // otherwise there will be corner cases, e.g., a segment is
@@ -1842,6 +1869,55 @@ void Client::PingThreadMain(bool is_ha_mode,
             // Reset ping failure count
             ping_fail_count = 0;
             auto& ping_response = ping_result.value();
+
+            // In HA mode, actively check if view_version_id changed (master switched)
+            if (is_ha_mode) {
+                if (!is_first_ping &&
+                    ping_response.view_version_id != last_known_view_version) {
+                    LOG(INFO) << "Detected master view version change: "
+                              << last_known_view_version << " -> "
+                              << ping_response.view_version_id
+                              << ", fetching latest master view and reconnecting";
+
+                    std::string new_master_address;
+                    ViewVersionId new_version = 0;
+                    auto err = master_view_helper_.GetMasterView(
+                        new_master_address, new_version);
+                    if (err == ErrorCode::OK) {
+                        if (new_master_address != current_master_address) {
+                            err = master_client_.Connect(new_master_address);
+                            if (err == ErrorCode::OK) {
+                                current_master_address = new_master_address;
+                                last_known_view_version = new_version;
+                                LOG(INFO) << "Reconnected to new master: "
+                                          << new_master_address
+                                          << ", view_version: " << new_version;
+                            } else {
+                                LOG(ERROR) << "Failed to connect to new master "
+                                           << new_master_address << ": "
+                                           << toString(err);
+                            }
+                        } else {
+                            // Same address but version changed (e.g., master
+                            // restarted), update version
+                            last_known_view_version = new_version;
+                            LOG(INFO) << "Master address unchanged but view "
+                                         "version updated: "
+                                      << new_version;
+                        }
+                    } else {
+                        LOG(ERROR) << "Failed to get new master view: "
+                                   << toString(err);
+                    }
+                } else {
+                    // Update last known view version
+                    last_known_view_version = ping_response.view_version_id;
+                    if (is_first_ping) {
+                        is_first_ping = false;
+                    }
+                }
+            }
+
             if (ping_response.client_status == ClientStatus::NEED_REMOUNT &&
                 !remount_segment_future.valid()) {
                 // Ensure at most one remount segment thread is running
@@ -1888,6 +1964,7 @@ void Client::PingThreadMain(bool is_ha_mode,
             }
 
             current_master_address = master_address;
+            last_known_view_version = next_version;  // Update version on reconnect
             LOG(INFO) << "Reconnected to master " << master_address;
             ping_fail_count = 0;
         } else {

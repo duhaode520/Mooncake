@@ -25,9 +25,16 @@ ClientTestWrapper::CreateClientWrapper(const std::string& hostname,
                                        const std::string& device_name,
                                        const std::string& master_server_entry,
                                        size_t local_buffer_size) {
-    auto client_opt =
-        Client::Create(hostname,  // Local hostname
-                       metadata_connstring, protocol, master_server_entry);
+    // Fix: Correctly pass device_names and master_server_entry parameters
+    // Client::Create signature:
+    //   (hostname, metadata_connstring, protocol, device_names, master_server_entry, ...)
+    auto client_opt = Client::Create(
+        hostname,  // Local hostname
+        metadata_connstring,
+        protocol,
+        device_name.empty() ? std::nullopt : std::make_optional<std::string>(device_name),  // device_names
+        master_server_entry  // master_server_entry (supports etcd:// protocol for HA mode)
+    );
 
     if (!client_opt.has_value()) {
         return std::nullopt;

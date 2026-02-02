@@ -1,5 +1,10 @@
 function(add_store_test name)
     add_executable(${name} ${ARGN})
+    # Set include directories for tests
+    target_include_directories(${name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_BINARY_DIR}/../include
+    )
     target_link_libraries(${name} PUBLIC
         mooncake_store
         transfer_engine
@@ -39,6 +44,17 @@ add_store_test(storage_backend_test storage_backend_test.cpp)
 add_store_test(mutex_test mutex_test.cpp)
 add_store_test(file_storage_test file_storage_test.cpp)
 add_store_test(task_manager_test task_manager_test.cpp)
+
+# Hot Standby Unit Tests
+add_store_test(standby_state_machine_test hot_standby_ut/standby_state_machine_test.cpp)
+add_store_test(oplog_manager_test hot_standby_ut/oplog_manager_test.cpp)
+add_store_test(etcd_oplog_store_test hot_standby_ut/etcd_oplog_store_test.cpp)
+add_store_test(oplog_applier_test hot_standby_ut/oplog_applier_test.cpp)
+add_store_test(oplog_watcher_test hot_standby_ut/oplog_watcher_test.cpp)
+add_store_test(hot_standby_service_test hot_standby_ut/hot_standby_service_test.cpp)
+add_store_test(ha_metric_manager_test hot_standby_ut/ha_metric_manager_test.cpp)
+add_store_test(hot_standby_integration_test hot_standby_integration_test.cpp)
+
 add_subdirectory(e2e)
 
 add_executable(high_availability_test high_availability_test.cpp)

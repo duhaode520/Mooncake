@@ -14,12 +14,14 @@
 #include <ylt/reflection/user_reflect_macro.hpp>
 #include <ylt/util/tl/expected.hpp>
 
+#include "ha_metric_manager.h"
 #include "master_metric_manager.h"
 #include "master_service.h"
 #include "rpc_helper.h"
 #include "types.h"
 #include "utils/scoped_vlog_timer.h"
 #include "version.h"
+// replication_service.h removed - using etcd-based OpLog sync instead
 
 namespace mooncake {
 
@@ -32,12 +34,24 @@ WrappedMasterService::WrappedMasterService(
       metric_report_running_(config.enable_metric_reporting) {
     init_http_server();
 
+    // ReplicationService removed - using etcd-based OpLog sync instead
+    // TODO: In Phase 1, initialize EtcdOpLogStore and integrate with
+    // OpLogManager
+    if (config.enable_ha) {
+        LOG(INFO) << "HA mode enabled - etcd-based OpLog sync will be "
+                     "implemented in Phase 1";
+    }
+
     if (config.enable_metric_reporting) {
         metric_report_thread_ = std::thread([this]() {
             while (metric_report_running_) {
                 std::string metrics_summary =
                     MasterMetricManager::instance().get_summary_string();
                 LOG(INFO) << "Master Metrics: " << metrics_summary;
+                // Log HA metrics summary
+                std::string ha_summary =
+                    HAMetricManager::instance().get_summary_string();
+                LOG(INFO) << ha_summary;
                 std::this_thread::sleep_for(
                     std::chrono::seconds(kMetricReportIntervalSeconds));
             }
@@ -50,7 +64,17 @@ WrappedMasterService::~WrappedMasterService() {
     if (metric_report_thread_.joinable()) {
         metric_report_thread_.join();
     }
+
+    // ReplicationService removed - using etcd-based OpLog sync instead
+
     http_server_.stop();
+}
+
+void WrappedMasterService::RestoreFromStandby(
+    const std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot,
+    uint64_t initial_oplog_sequence_id) {
+    master_service_.RestoreFromStandbySnapshot(snapshot,
+                                               initial_oplog_sequence_id);
 }
 
 void WrappedMasterService::init_http_server() {
@@ -60,6 +84,8 @@ void WrappedMasterService::init_http_server() {
         "/metrics", [](coro_http_request& req, coro_http_response& resp) {
             std::string metrics =
                 MasterMetricManager::instance().serialize_metrics();
+            // Append HA metrics
+            metrics += HAMetricManager::instance().serialize_metrics();
             resp.add_header("Content-Type", "text/plain; version=0.0.4");
             resp.set_status_and_content(status_type::ok, std::move(metrics));
         });
@@ -69,8 +95,19 @@ void WrappedMasterService::init_http_server() {
         [](coro_http_request& req, coro_http_response& resp) {
             std::string summary =
                 MasterMetricManager::instance().get_summary_string();
+            summary += "\n";
+            summary += HAMetricManager::instance().get_summary_string();
             resp.add_header("Content-Type", "text/plain; version=0.0.4");
             resp.set_status_and_content(status_type::ok, std::move(summary));
+        });
+
+    // Dedicated HA metrics endpoint
+    http_server_.set_http_handler<GET>(
+        "/metrics/ha", [](coro_http_request& req, coro_http_response& resp) {
+            std::string metrics =
+                HAMetricManager::instance().serialize_metrics();
+            resp.add_header("Content-Type", "text/plain; version=0.0.4");
+            resp.set_status_and_content(status_type::ok, std::move(metrics));
         });
 
     http_server_.set_http_handler<GET>(

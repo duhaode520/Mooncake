@@ -65,3 +65,12 @@ target_link_libraries(chaos_rand_test PUBLIC
     pthread
     ${ETCD_WRAPPER_LIB}
 )
+
+add_executable(client_put_test client_put_test.cpp ${MOONCAKE_E2E_TEST_SOURCES})
+target_link_libraries(client_put_test PUBLIC
+    mooncake_store
+    cachelib_memory_allocator
+    glog
+    pthread
+    ${ETCD_WRAPPER_LIB}
+)

@@ -1,16 +1,64 @@
 #include "ha_helper.h"
+
+#include <glog/logging.h>
+
+#include <chrono>
+#include <thread>
+
 #include "etcd_helper.h"
+#include "hot_standby_service.h"
 #include "rpc_service.h"
 
 namespace mooncake {
 
-MasterViewHelper::MasterViewHelper() {
-    std::string cluster_id;
+namespace {
+std::string ResolveClusterIdForMasterView(const std::string& cluster_id) {
+    std::string resolved;
+    if (!cluster_id.empty()) {
+        resolved = cluster_id;
+    } else {
     const char* cluster_id_env = std::getenv("MC_STORE_CLUSTER_ID");
     if (cluster_id_env != nullptr && strlen(cluster_id_env) > 0) {
-        cluster_id = cluster_id_env;
+            resolved = std::string(cluster_id_env);
     } else {
-        cluster_id = "mooncake";
+            resolved = DEFAULT_CLUSTER_ID;
+        }
+    }
+    
+    // Validate resolved cluster_id (even if it's the default).
+    // Strip trailing slashes for validation.
+    std::string normalized = resolved;
+    while (!normalized.empty() && normalized.back() == '/') {
+        normalized.pop_back();
+    }
+    if (!normalized.empty() && !IsValidClusterIdComponent(normalized)) {
+        LOG(FATAL) << "Invalid cluster_id resolved for MasterViewHelper: '" << resolved
+                   << "' (normalized: '" << normalized
+                   << "'). Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
+    }
+    
+    return resolved;
+}
+}  // namespace
+
+MasterViewHelper::MasterViewHelper(const std::string& cluster_id) {
+    BuildMasterViewKeyFromClusterId(ResolveClusterIdForMasterView(cluster_id));
+}
+
+void MasterViewHelper::SetClusterId(const std::string& cluster_id) {
+    BuildMasterViewKeyFromClusterId(ResolveClusterIdForMasterView(cluster_id));
+}
+
+void MasterViewHelper::BuildMasterViewKeyFromClusterId(
+    const std::string& cluster_id_in) {
+    std::string cluster_id = cluster_id_in;
+    // Normalize cluster_id for validation: strip trailing slashes.
+    while (!cluster_id.empty() && cluster_id.back() == '/') {
+        cluster_id.pop_back();
+    }
+    if (!IsValidClusterIdComponent(cluster_id)) {
+        LOG(FATAL) << "Invalid cluster_id for MasterViewHelper: '" << cluster_id
+                   << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
     }
     // Ensure the cluster_id ends with '/' if not empty
     if (!cluster_id.empty() && cluster_id.back() != '/') {
@@ -125,18 +173,76 @@ int MasterServiceSupervisor::Start() {
         }
 
         LOG(INFO) << "Init leader election helper...";
-        MasterViewHelper mv_helper;
+        MasterViewHelper mv_helper(config_.cluster_id);
         if (mv_helper.ConnectToEtcd(config_.etcd_endpoints) != ErrorCode::OK) {
             LOG(ERROR) << "Failed to connect to etcd endpoints: "
                        << config_.etcd_endpoints;
             return -1;
         }
-        LOG(INFO) << "Trying to elect self as leader...";
+
+#ifdef STORE_USE_ETCD
+        // Connect to etcd for OpLog sync
+        if (EtcdHelper::ConnectToEtcdStoreClient(config_.etcd_endpoints.c_str()) !=
+            ErrorCode::OK) {
+            LOG(ERROR) << "Failed to connect to etcd store client: "
+                       << config_.etcd_endpoints;
+            return -1;
+        }
+#endif
+
+        LOG(INFO) << "Checking for existing leader...";
         EtcdLeaseId lease_id = 0;
-        // view_version will be updated by ElectLeader and then used in
-        // WrappedMasterService
         ViewVersionId view_version = 0;
+
+        // Check if there is already a leader
+        std::string current_leader;
+        ViewVersionId current_version = 0;
+        auto ret = mv_helper.GetMasterView(current_leader, current_version);
+        bool had_standby = false;
+
+        if (ret == ErrorCode::OK) {
+            // There is an existing leader, start Standby service
+            LOG(INFO) << "Found existing leader: " << current_leader
+                      << ", starting Standby service...";
+            StartStandbyService(mv_helper, current_leader);
+            had_standby = true;
+
+            // Watch until leader is deleted
+            LOG(INFO) << "Watching for leadership change...";
+            auto watch_ret = EtcdHelper::WatchUntilDeleted(
+                mv_helper.GetMasterViewKey().c_str(), mv_helper.GetMasterViewKey().size());
+
+            if (watch_ret != ErrorCode::OK) {
+                LOG(ERROR) << "Error watching for leadership change: " << watch_ret;
+                // Stop Standby service on watch error and retry.
+                StopStandbyService();
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                continue;
+            }
+
+            LOG(INFO) << "Leader disappeared, trying to elect self as leader...";
+        } else {
+            LOG(INFO) << "No existing leader found, trying to elect self as leader...";
+        }
+
+        // Try to elect self as leader
         mv_helper.ElectLeader(config_.local_hostname, view_version, lease_id);
+
+        // If we were running as Standby, finalize catch-up and snapshot metadata now.
+        std::vector<std::pair<std::string, StandbyObjectMetadata>> standby_snapshot;
+        uint64_t standby_last_seq_id = 0;
+#ifdef STORE_USE_ETCD
+        if (had_standby && standby_service_ && standby_running_.load()) {
+            LOG(INFO) << "Finalizing standby state for promotion...";
+            standby_service_->Promote();  // does final catch-up sync + stops watcher
+            standby_last_seq_id = standby_service_->GetLatestAppliedSequenceId();
+            standby_service_->ExportMetadataSnapshot(standby_snapshot);
+            // We are now leader; standby service is no longer needed.
+            StopStandbyService();
+            LOG(INFO) << "Standby snapshot ready: keys=" << standby_snapshot.size()
+                      << ", last_seq_id=" << standby_last_seq_id;
+        }
+#endif
 
         // Start a thread to keep the leader alive
         auto keep_leader_thread =
@@ -154,6 +260,14 @@ int MasterServiceSupervisor::Start() {
         LOG(INFO) << "Starting master service...";
         mooncake::WrappedMasterService wrapped_master_service(
             mooncake::WrappedMasterServiceConfig(config_, view_version));
+
+        // Restore from promoted standby snapshot if available.
+#ifdef STORE_USE_ETCD
+        if (standby_last_seq_id > 0 || !standby_snapshot.empty()) {
+            wrapped_master_service.RestoreFromStandby(standby_snapshot, standby_last_seq_id);
+        }
+#endif
+
         mooncake::RegisterRpcService(server, wrapped_master_service);
         // Metric reporting is now handled by WrappedMasterService.
 
@@ -186,7 +300,56 @@ int MasterServiceSupervisor::Start() {
     return 0;
 }
 
+void MasterServiceSupervisor::StartStandbyService(MasterViewHelper& mv_helper,
+                                                   const std::string& current_leader) {
+#ifdef STORE_USE_ETCD
+    if (standby_running_.load()) {
+        LOG(WARNING) << "Standby service is already running";
+        return;
+    }
+
+    HotStandbyConfig standby_config;
+    standby_config.standby_id = config_.local_hostname;
+    standby_config.primary_address = current_leader;
+    standby_config.verification_interval_sec = 30;
+    standby_config.max_replication_lag_entries = 1000;
+    standby_config.enable_verification = false;  // Disable verification for now
+
+    standby_service_ = std::make_unique<HotStandbyService>(standby_config);
+
+    ErrorCode err = standby_service_->Start(
+        current_leader, config_.etcd_endpoints, config_.cluster_id);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to start Standby service: " << err;
+        standby_service_.reset();
+        return;
+    }
+
+    standby_running_.store(true);
+    LOG(INFO) << "Standby service started successfully";
+#else
+    LOG(WARNING) << "STORE_USE_ETCD is not enabled, cannot start Standby service";
+#endif
+}
+
+void MasterServiceSupervisor::StopStandbyService() {
+#ifdef STORE_USE_ETCD
+    if (!standby_running_.load()) {
+        return;
+    }
+
+    if (standby_service_) {
+        standby_service_->Stop();
+        standby_service_.reset();
+    }
+
+    standby_running_.store(false);
+    LOG(INFO) << "Standby service stopped";
+#endif
+}
+
 MasterServiceSupervisor::~MasterServiceSupervisor() {
+    StopStandbyService();
     if (server_thread_.joinable()) {
         server_thread_.join();
     }
