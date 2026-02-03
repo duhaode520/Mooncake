@@ -138,8 +138,9 @@ std::string MasterService::SerializeMetadataForOpLog(const ObjectMetadata& metad
     payload.size = metadata.size;
     
     // Extract replica descriptors - get them all at once
-    payload.replicas.reserve(metadata.replicas.size());
-    for (const auto& replica : metadata.replicas) {
+    const auto& replicas = metadata.GetAllReplicas();
+    payload.replicas.reserve(replicas.size());
+    for (const auto& replica : replicas) {
         payload.replicas.push_back(replica.get_descriptor());
     }
     
@@ -158,8 +159,9 @@ std::string MasterService::SerializeMetadataForOpLogWithoutMemReplicas(
     payload.client_id = metadata.client_id;
     payload.size = metadata.size;
 
-    payload.replicas.reserve(metadata.replicas.size());
-    for (const auto& replica : metadata.replicas) {
+    const auto& replicas = metadata.GetAllReplicas();
+    payload.replicas.reserve(replicas.size());
+    for (const auto& replica : replicas) {
         if (replica.type() == ReplicaType::MEMORY) {
             continue;
         }
@@ -390,7 +392,7 @@ void MasterService::RestoreFromStandbySnapshot(
         return alloc;
     };
 
-    const auto now = std::chrono::steady_clock::now();
+    const auto now = std::chrono::system_clock::now();
     size_t restored = 0;
     for (const auto& kv : snapshot) {
         const std::string& key = kv.first;
@@ -415,11 +417,11 @@ void MasterService::RestoreFromStandbySnapshot(
         const bool enable_soft_pin = false;  // Will be set by new Primary if needed
 
         const size_t shard_idx = getShardIndex(key);
-        MutexLocker lock(&metadata_shards_[shard_idx].mutex);
+        MetadataShardAccessorRW shard(this, shard_idx);
 
         // Overwrite existing key if any.
-        metadata_shards_[shard_idx].metadata.erase(key);
-        auto [it, inserted] = metadata_shards_[shard_idx].metadata.emplace(
+        shard->metadata.erase(key);
+        auto [it, inserted] = shard->metadata.emplace(
             std::piecewise_construct, std::forward_as_tuple(key),
             std::forward_as_tuple(sm.client_id, now, static_cast<size_t>(sm.size),
                                   std::move(replicas), enable_soft_pin));
@@ -429,7 +431,7 @@ void MasterService::RestoreFromStandbySnapshot(
         // (via GetReplicaList, ExistKey, etc.)
 
         // Objects restored from PUT_END are expected to be completed.
-        metadata_shards_[shard_idx].processing_keys.erase(key);
+        shard->processing_keys.erase(key);
 
         restored++;
     }
@@ -783,7 +785,7 @@ auto MasterService::ReMountSegment(const std::vector<Segment>& segments,
 
 void MasterService::ClearInvalidHandles() {
     for (auto& shard : metadata_shards_) {
-        MutexLocker lock(&shard.mutex);
+        SharedMutexLocker lock(&shard.mutex);
         auto it = shard.metadata.begin();
         while (it != shard.metadata.end()) {
             // CleanupStaleHandles may remove MEMORY replicas whose allocator has
@@ -893,20 +895,17 @@ auto MasterService::ExistKey(const std::string& key)
     }
 
     auto& metadata = accessor.Get();
-    for (const auto& replica : metadata.replicas) {
-        if (replica.status() == ReplicaStatus::COMPLETE) {
-            // Grant a lease to the object as it may be further used by the
-            // client.
-            metadata.GrantLease(default_kv_lease_ttl_,
-                                default_kv_soft_pin_ttl_);
-            // Note: LEASE_RENEW is not recorded in OpLog since Standby does not
-            // perform eviction. Standby will receive DELETE events from Primary
-            // when objects are evicted.
-            return true;
-        }
+    if (metadata.HasReplica(&Replica::fn_is_completed)) {
+        // Grant a lease to the object as it may be further used by the
+        // client.
+        metadata.GrantLease(default_kv_lease_ttl_, default_kv_soft_pin_ttl_);
+        // Note: LEASE_RENEW is not recorded in OpLog since Standby does not
+        // perform eviction. Standby will receive DELETE events from Primary
+        // when objects are evicted.
+        return true;
     }
 
-    return false;  // If no complete replica is found, return false
+    return false;
 }
 
 std::vector<tl::expected<bool, ErrorCode>> MasterService::BatchExistKey(
@@ -1129,24 +1128,20 @@ auto MasterService::BatchReplicaClear(
 
             // HA safety (Scheme A):
             // Removing replicas may free/reuse MEMORY replicas. Persist updated metadata
-            // BEFORE mutating metadata.replicas (which may free memory).
+            // BEFORE mutating local replicas (which may free memory).
 #ifdef STORE_USE_ETCD
             if (enable_ha_) {
                 // Build the remaining replica descriptor list after removal.
-                std::vector<bool> remove_mask(metadata.replicas.size(), false);
-                for (size_t idx : replicas_to_remove) {
-                    if (idx < remove_mask.size()) {
-                        remove_mask[idx] = true;
-                    }
-                }
                 std::vector<Replica::Descriptor> remaining;
-                remaining.reserve(metadata.replicas.size());
-                for (size_t i = 0; i < metadata.replicas.size(); ++i) {
-                    if (remove_mask[i]) {
-                        continue;
-                    }
-                    remaining.emplace_back(metadata.replicas[i].get_descriptor());
-                }
+                remaining.reserve(metadata.CountReplicas());
+                metadata.VisitReplicas(
+                    [](const Replica&) { return true; },
+                    [&](const Replica& replica) {
+                        if (match_replica_on_segment(replica)) {
+                            return;
+                        }
+                        remaining.emplace_back(replica.get_descriptor());
+                    });
 
                 if (remaining.empty()) {
                     AppendOrPersistOrEnqueue("BatchReplicaClear(partial REMOVE)",
@@ -1166,33 +1161,25 @@ auto MasterService::BatchReplicaClear(
             }
 #endif
 
-            // Remove replicas on the specified segment (in reverse order to
-            // maintain indices)
-            for (auto it = replicas_to_remove.rbegin();
-                 it != replicas_to_remove.rend(); ++it) {
-                size_t idx = *it;
-                const auto& replica = metadata.replicas[idx];
-
+            // Apply local mutation and metrics (after HA persistence attempt).
+            metadata.VisitReplicas(match_replica_on_segment, [](Replica& replica) {
                 if (replica.is_memory_replica()) {
                     MasterMetricManager::instance().dec_mem_cache_nums();
                 } else if (replica.is_disk_replica()) {
                     MasterMetricManager::instance().dec_file_cache_nums();
                 }
-                metadata.replicas.erase(metadata.replicas.begin() + idx);
-            }
+            });
+
+            metadata.EraseReplicas(match_replica_on_segment);
 
             // If no valid replicas remain, erase the entire metadata
-            if (metadata.replicas.empty() || !metadata.IsValid()) {
+            if (!metadata.IsValid()) {
 #ifndef STORE_USE_ETCD
                 // Non-HA: keep old behavior; HA already persisted REMOVE above.
                 if (!enable_ha_) {
                     AppendOpLogAndNotify(OpType::REMOVE, key);
                 }
 #endif
-
-            metadata.EraseReplicas(match_replica_on_segment);
-            // If no valid replicas remain, erase the entire metadata
-            if (!metadata.IsValid()) {    
                 accessor.Erase();
             } else {
 #ifndef STORE_USE_ETCD
@@ -1338,6 +1325,13 @@ auto MasterService::PutStart(const UUID& client_id, const std::string& key,
     auto it = shard->metadata.find(key);
     if (it != shard->metadata.end() && !CleanupStaleHandles(it->second)) {
         auto& metadata = it->second;
+
+        // Safety: do not overwrite keys that have an ongoing replication task.
+        if (shard->replication_tasks.find(key) != shard->replication_tasks.end()) {
+            LOG(WARNING) << "key=" << key
+                         << ", error=object_has_replication_task";
+            return tl::make_unexpected(ErrorCode::OBJECT_HAS_REPLICATION_TASK);
+        }
         // If the object's PutStart expired and has not completed any
         // replicas, we can discard it and allow the new PutStart to
         // go.
@@ -1352,7 +1346,7 @@ auto MasterService::PutStart(const UUID& client_id, const std::string& key,
             }
             shard->processing_keys.erase(key);
             shard->metadata.erase(it);
-        } else if (metadata.HasCompletedReplicas()) {
+        } else if (metadata.HasReplica(&Replica::fn_is_completed)) {
             // Allow overwriting existing key even if lease is still active.
             // This enables update operations. Note that overwriting an object
             // with an active lease may cause clients reading it to see stale
@@ -1377,6 +1371,15 @@ auto MasterService::PutStart(const UUID& client_id, const std::string& key,
                                  .count();
             }
             // Remove the old object to allow new PutStart
+#ifdef STORE_USE_ETCD
+            if (enable_ha_) {
+                // Scheme A safety: overwriting may free/reuse MEMORY replicas.
+                // Persist REMOVE to etcd BEFORE erasing local metadata.
+                AppendOrPersistOrEnqueue("PutStart(overwrite REMOVE)",
+                                         OpType::REMOVE, key, std::string(),
+                                         PendingMutationKind::CLEAR_ALL_REPLICAS);
+            }
+#endif
             shard->processing_keys.erase(key);
             shard->metadata.erase(it);
         } else {
@@ -3656,33 +3659,29 @@ void MasterService::BatchEvict(double evict_ratio_target,
                     //   (without MEMORY replicas) before freeing memory.
                     // - If key becomes invalid (only had MEMORY replicas),
                     //   durably persist REMOVE before freeing memory.
-                    total_freed_size +=
-                        it->second.size * it->second.GetMemReplicaCount();
-
                     if (enable_ha_) {
                         const bool has_non_mem_replica =
-                            std::any_of(it->second.replicas.begin(),
-                                        it->second.replicas.end(),
-                                        [](const Replica& r) {
-                                            return r.type() != ReplicaType::MEMORY;
-                                        });
+                            it->second.HasReplica([](const Replica& r) {
+                                return r.type() != ReplicaType::MEMORY;
+                            });
                         if (has_non_mem_replica) {
                             AppendOrPersistOrEnqueueLazy(
                                 "BatchEvict(PUT_END)", OpType::PUT_END, it->first,
                                 [&]() {
-                                    return SerializeMetadataForOpLogWithoutMemReplicas(it->second);
+                                    return SerializeMetadataForOpLogWithoutMemReplicas(
+                                        it->second);
                                 },
                                 PendingMutationKind::EVICT_MEM_REPLICAS);
                         } else {
                             AppendOrPersistOrEnqueue(
                                 "BatchEvict(REMOVE)", OpType::REMOVE, it->first,
-                                std::string(),
-                                PendingMutationKind::EVICT_MEM_REPLICAS);
+                                std::string(), PendingMutationKind::EVICT_MEM_REPLICAS);
                         }
                     }
 
-                    it->second.EraseReplica(
-                        ReplicaType::MEMORY);  // Erase memory replicas
+                    total_freed_size +=
+                        it->second.size * evict_replicas(it->second);
+
                     if (it->second.IsValid() == false) {
                         it = shard->metadata.erase(it);
                     } else {
@@ -3737,25 +3736,19 @@ void MasterService::BatchEvict(double evict_ratio_target,
                 while (it != shard->metadata.end() && target_evict_num > 0) {
                     if (it->second.lease_timeout <= target_timeout &&
                         !it->second.IsSoftPinned(now) &&
-                        !it->second.HasDiffRepStatus(ReplicaStatus::COMPLETE,
-                                                     ReplicaType::MEMORY) &&
-                        it->second.HasMemReplica()) {
+                        can_evict_replicas(it->second)) {
                         // Evict this object (MEMORY replicas only). See Scheme A above.
-                        total_freed_size +=
-                            it->second.size * it->second.GetMemReplicaCount();
-
                         if (enable_ha_) {
                             const bool has_non_mem_replica =
-                                std::any_of(it->second.replicas.begin(),
-                                            it->second.replicas.end(),
-                                            [](const Replica& r) {
-                                                return r.type() != ReplicaType::MEMORY;
-                                            });
+                                it->second.HasReplica([](const Replica& r) {
+                                    return r.type() != ReplicaType::MEMORY;
+                                });
                             if (has_non_mem_replica) {
                                 AppendOrPersistOrEnqueueLazy(
                                     "BatchEvict(PUT_END)", OpType::PUT_END, it->first,
                                     [&]() {
-                                        return SerializeMetadataForOpLogWithoutMemReplicas(it->second);
+                                        return SerializeMetadataForOpLogWithoutMemReplicas(
+                                            it->second);
                                     },
                                     PendingMutationKind::EVICT_MEM_REPLICAS);
                             } else {
@@ -3766,8 +3759,8 @@ void MasterService::BatchEvict(double evict_ratio_target,
                             }
                         }
 
-                        it->second.EraseReplica(
-                            ReplicaType::MEMORY);  // Erase memory replicas
+                        total_freed_size +=
+                            it->second.size * evict_replicas(it->second);
                         if (it->second.IsValid() == false) {
                             it = shard->metadata.erase(it);
                         } else {
@@ -3813,21 +3806,17 @@ void MasterService::BatchEvict(double evict_ratio_target,
                     // and lease timeout less than or equal to target.
                     if (!it->second.IsSoftPinned(now) ||
                         it->second.lease_timeout <= soft_target_timeout) {
-                        total_freed_size +=
-                            it->second.size * it->second.GetMemReplicaCount();
-
                         if (enable_ha_) {
                             const bool has_non_mem_replica =
-                                std::any_of(it->second.replicas.begin(),
-                                            it->second.replicas.end(),
-                                            [](const Replica& r) {
-                                                return r.type() != ReplicaType::MEMORY;
-                                            });
+                                it->second.HasReplica([](const Replica& r) {
+                                    return r.type() != ReplicaType::MEMORY;
+                                });
                             if (has_non_mem_replica) {
                                 AppendOrPersistOrEnqueueLazy(
                                     "BatchEvict(PUT_END)", OpType::PUT_END, it->first,
                                     [&]() {
-                                        return SerializeMetadataForOpLogWithoutMemReplicas(it->second);
+                                        return SerializeMetadataForOpLogWithoutMemReplicas(
+                                            it->second);
                                     },
                                     PendingMutationKind::EVICT_MEM_REPLICAS);
                             } else {
@@ -3838,8 +3827,8 @@ void MasterService::BatchEvict(double evict_ratio_target,
                             }
                         }
 
-                        it->second.EraseReplica(
-                            ReplicaType::MEMORY);  // Erase memory replicas
+                        total_freed_size +=
+                            it->second.size * evict_replicas(it->second);
                         if (it->second.IsValid() == false) {
                             it = shard->metadata.erase(it);
                         } else {

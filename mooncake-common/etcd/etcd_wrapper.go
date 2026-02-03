@@ -69,8 +69,6 @@ var (
 	// etcd client for HA snapshot
 	snapshotClient  *clientv3.Client
 	snapshotMutex   sync.Mutex
-	storeWatchCtx   = make(map[string]context.CancelFunc)
-	storeWatchMutex sync.Mutex
 	// watch contexts for prefix watch
 	storePrefixWatchCtx   = make(map[string]prefixWatchInfo)
 	storePrefixWatchMutex sync.Mutex
