@@ -2859,10 +2859,13 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch())
                 .count();
+        uint64_t last_seq_id = oplog_manager_.GetLastSequenceId();
+        
+        // Format: protocol|version|snapshot_id|meta_size|meta_crc|seg_size|seg_crc|timestamp|status|oplog_seq_id
         std::string manifest_content =
-            fmt::format("{}|{}|{}|{}|{}|{}|{}|{}|{}", serializer_type_str,
+            fmt::format("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}", serializer_type_str,
                         SNAPSHOT_SERIALIZER_VERSION, snapshot_id, meta_size,
-                        meta_crc, seg_size, seg_crc, timestamp, "complete");
+                        meta_crc, seg_size, seg_crc, timestamp, "complete", last_seq_id);
         std::vector<uint8_t> manifest_bytes(
             manifest_content.data(),
             manifest_content.data() + manifest_content.size());
@@ -3257,6 +3260,7 @@ void MasterService::RestoreState() {
             uint32_t expected_meta_crc = 0;
             uint64_t expected_seg_size = 0;
             uint32_t expected_seg_crc = 0;
+            uint64_t snapshot_oplog_seq_id = 0;
 
             if (parts.size() >= 3) {
                 protocol_type = parts[0];
@@ -3291,9 +3295,18 @@ void MasterService::RestoreState() {
                 }
             }
 
+            if (parts.size() >= 10) {
+                 try {
+                    snapshot_oplog_seq_id = std::stoull(parts[9]);
+                 } catch (...) {
+                    LOG(WARNING) << "[Restore] Failed to parse oplog seq id from manifest";
+                 }
+            }
+
             LOG(INFO) << "[Restore] Restoring state from snapshot: " << state_id
                       << " version: " << version
-                      << " protocol: " << protocol_type;
+                      << " protocol: " << protocol_type
+                      << " oplog_seq: " << snapshot_oplog_seq_id;
 
             // 3. Download metadata
             std::string metadata_path = path_prefix + SNAPSHOT_METADATA_FILE;
@@ -4009,9 +4022,9 @@ MasterService::MetadataSerializer::Serialize() {
     msgpack::sbuffer sbuf;
     msgpack::packer<msgpack::sbuffer> packer(&sbuf);
 
-    // Create top-level map with 3 fields: "shards", "discarded_replicas",
-    // "replica_next_id"
-    packer.pack_map(3);
+    // Create top-level map with 4 fields: "shards", "discarded_replicas",
+    // "replica_next_id", "oplog_sequence_id"
+    packer.pack_map(4);
 
     // 1. Serialize metadata shards
     packer.pack("shards");
@@ -4076,6 +4089,14 @@ MasterService::MetadataSerializer::Serialize() {
     // replica IDs)
     packer.pack("replica_next_id");
     packer.pack(static_cast<uint64_t>(Replica::next_id_.load()));
+
+    // 4. Serialize oplog_sequence_id
+    // This allows Standby to resume OpLog replay from the correct point after restore.
+    // Note: SNAPSHOT_MUTEX in PersistState protects against concurrent
+    // metadata/OpLog updates, ensuring this ID is consistent with the serialized metadata.
+    packer.pack("oplog_sequence_id");
+    packer.pack(service_->oplog_manager_.GetLastSequenceId());
+    
     return std::vector<uint8_t>(
         reinterpret_cast<const uint8_t*>(sbuf.data()),
         reinterpret_cast<const uint8_t*>(sbuf.data()) + sbuf.size());
@@ -4109,6 +4130,7 @@ MasterService::MetadataSerializer::Deserialize(
     const msgpack::object* shards_obj = nullptr;
     const msgpack::object* discarded_replicas_obj = nullptr;
     const msgpack::object* replica_next_id_obj = nullptr;
+    const msgpack::object* oplog_sequence_id_obj = nullptr;
 
     // Extract fields from top-level map
     for (uint32_t i = 0; i < obj.via.map.size; ++i) {
@@ -4121,6 +4143,8 @@ MasterService::MetadataSerializer::Deserialize(
                 discarded_replicas_obj = &obj.via.map.ptr[i].val;
             } else if (key == "replica_next_id") {
                 replica_next_id_obj = &obj.via.map.ptr[i].val;
+            } else if (key == "oplog_sequence_id") {
+                oplog_sequence_id_obj = &obj.via.map.ptr[i].val;
             }
         }
     }
@@ -4202,6 +4226,15 @@ MasterService::MetadataSerializer::Deserialize(
     auto next_id = replica_next_id_obj->as<uint64_t>();
     Replica::next_id_.store(next_id);
     LOG(INFO) << "Restored Replica::next_id_ to " << next_id;
+
+    // Restore oplog_sequence_id (if present)
+    if (oplog_sequence_id_obj != nullptr) {
+        auto last_seq_id = oplog_sequence_id_obj->as<uint64_t>();
+        service_->oplog_manager_.SetInitialSequenceId(last_seq_id);
+        LOG(INFO) << "Restored OpLog sequence_id to " << last_seq_id;
+    } else {
+        LOG(INFO) << "No oplog_sequence_id in snapshot, keeping current (probably 0)";
+    }
 
     return {};
 }
