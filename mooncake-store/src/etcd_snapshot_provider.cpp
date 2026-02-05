@@ -68,7 +68,7 @@ bool EtcdSnapshotProvider::LoadLatestSnapshot(
 
     // 3. Download Metadata
     std::vector<uint8_t> meta_blob;
-    if (!backend_->DownloadBuffer(prefix + "metadata.msgpack", meta_blob)) {
+    if (!backend_->DownloadBuffer(prefix + "metadata", meta_blob)) {
         LOG(ERROR) << "[Standby] Failed to download metadata for " << snapshot_id;
         return false;
     }
