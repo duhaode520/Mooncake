@@ -800,6 +800,7 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 	storePrefixWatchMutex.Lock()
 	if _, exists := storePrefixWatchCtx[p]; exists {
 		storePrefixWatchMutex.Unlock()
+		cancel() // Fix potential context leak
 		*errMsg = C.CString("This prefix is already being watched")
 		return -1
 	}
@@ -811,18 +812,8 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 	}
 	storePrefixWatchMutex.Unlock()
 
-	// Register callback context as valid
-	validCallbackContextMutex.Lock()
-	validCallbackContexts[callbackContext] = true
-	validCallbackContextMutex.Unlock()
-
 	go func(doneCh chan struct{}) {
 		defer func() {
-			// Unregister callback context when goroutine exits
-			validCallbackContextMutex.Lock()
-			delete(validCallbackContexts, callbackContext)
-			validCallbackContextMutex.Unlock()
-
 			// Remove watch entry and signal completion
 			storePrefixWatchMutex.Lock()
 			delete(storePrefixWatchCtx, p)
@@ -841,90 +832,37 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 			case watchResp, ok := <-watchChan:
 				if !ok {
 					// Channel closed. Check if context was cancelled.
-					// If cancelled, don't call callback as C++ object may be destroyed.
 					select {
 					case <-ctx.Done():
-						// Context was cancelled, just return without calling callback
 						return
 					default:
-						// Check if callback context is still valid
-						validCallbackContextMutex.RLock()
-						_, stillValid := validCallbackContexts[callbackContext]
-						validCallbackContextMutex.RUnlock()
-
-						if !stillValid {
-							// Context is no longer valid, skip callback
-							return
-						}
-
-						// Channel closed unexpectedly (not cancelled). Notify C++ watcher to reconnect.
-						func() {
-							defer func() {
-								if r := recover(); r != nil {
-									// C++ callback caused panic (likely object destroyed)
-									// Remove from valid contexts
-									validCallbackContextMutex.Lock()
-									delete(validCallbackContexts, callbackContext)
-									validCallbackContextMutex.Unlock()
-								}
-							}()
-							// Call the C callback function via C trampoline (safe ABI)
-							C.call_watch_cb(callbackFunc, callbackContext, nil, 0, nil, 0, C.int(2) /*WATCH_BROKEN*/, C.longlong(0))
-						}()
+						// Call the C callback with error
+						C.call_watch_cb(callbackFunc, callbackContext, nil, 0, nil, 0, C.int(2) /*WATCH_BROKEN*/, C.longlong(0))
 						return
 					}
 				}
 				if watchResp.Err() != nil {
-					// Watch error. Check if context was cancelled before calling callback.
 					select {
 					case <-ctx.Done():
-						// Context was cancelled, just return without calling callback
 						return
 					default:
-						// Check if callback context is still valid
-						validCallbackContextMutex.RLock()
-						_, stillValid := validCallbackContexts[callbackContext]
-						validCallbackContextMutex.RUnlock()
-
-						if !stillValid {
-							// Context is no longer valid, skip callback
-							return
-						}
-
-						// Watch error (not cancelled). Notify C++ watcher to reconnect.
-						func() {
-							defer func() {
-								if r := recover(); r != nil {
-									// C++ callback caused panic (likely object destroyed)
-									// Remove from valid contexts
-									validCallbackContextMutex.Lock()
-									delete(validCallbackContexts, callbackContext)
-									validCallbackContextMutex.Unlock()
-								}
-							}()
-							// Call the C callback function via C trampoline (safe ABI)
-							C.call_watch_cb(callbackFunc, callbackContext, nil, 0, nil, 0, C.int(2) /*WATCH_BROKEN*/, C.longlong(0))
-						}()
+						// Call the C callback with error
+						C.call_watch_cb(callbackFunc, callbackContext, nil, 0, nil, 0, C.int(2) /*WATCH_BROKEN*/, C.longlong(0))
 						return
 					}
 				}
 
-				// Use response-level revision as a more stable resume point.
-				// (It can be >= individual event's ModRevision.)
-				// Note: watchResp.Header is a value type, not a pointer, so we can directly access it.
 				respRev := int64(0)
 				if watchResp.Header.Revision > 0 {
 					respRev = watchResp.Header.Revision
 				}
 
 				for _, event := range watchResp.Events {
-					// Check if context was cancelled before processing each event
+					// Check cancel before processing
 					select {
 					case <-ctx.Done():
-						// Context was cancelled, stop processing events
 						return
 					default:
-						// Continue processing
 					}
 
 					keyStr := string(event.Kv.Key)
@@ -957,74 +895,8 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 						modRev = C.longlong(respRev)
 					}
 
-					// Check context again before calling callback
-					select {
-					case <-ctx.Done():
-						// Context was cancelled, free allocated memory and return
-						C.free(unsafe.Pointer(keyPtr))
-						if valuePtr != nil {
-							C.free(unsafe.Pointer(valuePtr))
-						}
-						return
-					default:
-						// Check if callback context is still valid before calling
-						// This prevents calling callback after C++ object is destroyed
-						validCallbackContextMutex.RLock()
-						_, stillValid := validCallbackContexts[callbackContext]
-						validCallbackContextMutex.RUnlock()
-
-						if !stillValid {
-							// Context is no longer valid (object destroyed), skip callback
-							C.free(unsafe.Pointer(keyPtr))
-							if valuePtr != nil {
-								C.free(unsafe.Pointer(valuePtr))
-							}
-							return
-						}
-
-						// Double-check context wasn't cancelled between check and call
-						select {
-						case <-ctx.Done():
-							// Context was cancelled, free memory and return
-							C.free(unsafe.Pointer(keyPtr))
-							if valuePtr != nil {
-								C.free(unsafe.Pointer(valuePtr))
-							}
-							return
-						default:
-							// Final check: verify context is still valid immediately before calling
-							// This minimizes the time window between check and call
-							validCallbackContextMutex.RLock()
-							_, stillValid := validCallbackContexts[callbackContext]
-							validCallbackContextMutex.RUnlock()
-
-							if !stillValid {
-								// Context was invalidated between previous check and now, skip callback
-								C.free(unsafe.Pointer(keyPtr))
-								if valuePtr != nil {
-									C.free(unsafe.Pointer(valuePtr))
-								}
-								return
-							}
-
-							// Call callback with panic recovery to prevent crash if C++ object is destroyed
-							func() {
-								defer func() {
-									if r := recover(); r != nil {
-										// C++ callback caused panic (likely object destroyed)
-										// Remove from valid contexts to prevent future callbacks
-										validCallbackContextMutex.Lock()
-										delete(validCallbackContexts, callbackContext)
-										validCallbackContextMutex.Unlock()
-									}
-								}()
-								// Callback signature:
-								// void cb(void* ctx, char* key, size_t keySize, char* value, size_t valueSize, int eventType, long long modRev)
-								// Call the C callback function via C trampoline (safe ABI)
-								C.call_watch_cb(callbackFunc, callbackContext, keyPtr, keySize, valuePtr, valueSize, eventType, modRev)
-							}()
-						}
-					}
+					// Direct call without redundant validity checks or recover
+					C.call_watch_cb(callbackFunc, callbackContext, keyPtr, keySize, valuePtr, valueSize, eventType, modRev)
 
 					C.free(unsafe.Pointer(keyPtr))
 					if valuePtr != nil {
