@@ -2562,9 +2562,9 @@ void MasterService::SnapshotThreadFunc() {
                               << snapshot_seq_id;
                     auto cleanup_res =
                         oplog_manager_.CleanupOpLogBefore(snapshot_seq_id);
-                    if (!cleanup_res) {
+                    if (cleanup_res != ErrorCode::OK) {
                         LOG(WARNING) << "[Snapshot] Failed to cleanup OpLog: "
-                                     << cleanup_res.error().message;
+                                     << cleanup_res;
                     }
                 }
             }
@@ -2638,9 +2638,9 @@ void MasterService::SnapshotThreadFunc() {
                           << fork_seq_id;
                 auto cleanup_res =
                     oplog_manager_.CleanupOpLogBefore(fork_seq_id);
-                if (!cleanup_res) {
+                if (cleanup_res != ErrorCode::OK) {
                     LOG(WARNING) << "[Snapshot] Failed to cleanup OpLog: "
-                                 << cleanup_res.error().message;
+                                 << cleanup_res;
                 }
             }
         }
