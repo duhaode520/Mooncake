@@ -2540,8 +2540,9 @@ void MasterService::SnapshotThreadFunc() {
                          "daemon, snapshot_id="
                       << snapshot_id;
 
+            uint64_t snapshot_seq_id = 0;
             // Serialize in parent process (PersistState manages snapshot lock)
-            auto result = PersistState(snapshot_id);
+            auto result = PersistState(snapshot_id, &snapshot_seq_id);
 
             if (!result) {
                 LOG(ERROR) << "[Snapshot] Failed to persist state via daemon, "
@@ -2554,6 +2555,18 @@ void MasterService::SnapshotThreadFunc() {
                              "daemon, snapshot_id="
                           << snapshot_id;
                 MasterMetricManager::instance().inc_snapshot_success();
+
+                if (snapshot_seq_id > 0) {
+                    LOG(INFO) << "[Snapshot] Triggering OpLog cleanup before "
+                                 "seq_id="
+                              << snapshot_seq_id;
+                    auto cleanup_res =
+                        oplog_manager_.CleanupOpLogBefore(snapshot_seq_id);
+                    if (!cleanup_res) {
+                        LOG(WARNING) << "[Snapshot] Failed to cleanup OpLog: "
+                                     << cleanup_res.error().message;
+                    }
+                }
             }
             continue;
         }
@@ -2572,8 +2585,10 @@ void MasterService::SnapshotThreadFunc() {
         }
 
         pid_t pid;
+        uint64_t fork_seq_id = 0;
         {
             std::unique_lock<std::shared_mutex> lock(SNAPSHOT_MUTEX);
+            fork_seq_id = oplog_manager_.GetLastSequenceId();
             LOG(INFO) << "[Snapshot] Locking snapshot mutex, snapshot_id="
                       << snapshot_id;
             pid = fork();
@@ -2615,14 +2630,25 @@ void MasterService::SnapshotThreadFunc() {
             // Parent process
             // Close write end, pass read end to wait function
             close(log_pipe[1]);
-            WaitForSnapshotChild(pid, snapshot_id, log_pipe[0]);
+            bool success = WaitForSnapshotChild(pid, snapshot_id, log_pipe[0]);
             close(log_pipe[0]);
+            if (success && fork_seq_id > 0) {
+                LOG(INFO) << "[Snapshot] Triggering OpLog cleanup before "
+                             "seq_id="
+                          << fork_seq_id;
+                auto cleanup_res =
+                    oplog_manager_.CleanupOpLogBefore(fork_seq_id);
+                if (!cleanup_res) {
+                    LOG(WARNING) << "[Snapshot] Failed to cleanup OpLog: "
+                                 << cleanup_res.error().message;
+                }
+            }
         }
     }
     LOG(INFO) << "[Snapshot] snapshot_thread stopped";
 }
 
-void MasterService::WaitForSnapshotChild(pid_t pid,
+bool MasterService::WaitForSnapshotChild(pid_t pid,
                                          const std::string& snapshot_id,
                                          int log_pipe_fd) {
     // Default 5 minute timeout
@@ -2682,7 +2708,7 @@ void MasterService::WaitForSnapshotChild(pid_t pid,
                        << strerror(errno) << ", snapshot_id=" << snapshot_id
                        << ", child_pid=" << pid;
             MasterMetricManager::instance().inc_snapshot_fail();
-            return;
+            return false;
         } else if (result == 0) {
             // Child process is still running
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -2697,7 +2723,7 @@ void MasterService::WaitForSnapshotChild(pid_t pid,
                 }
                 HandleChildTimeout(pid, snapshot_id);
                 MasterMetricManager::instance().inc_snapshot_fail();
-                return;
+                return false;
             }
 
             // Log every 30 seconds to track progress
@@ -2718,13 +2744,13 @@ void MasterService::WaitForSnapshotChild(pid_t pid,
                 LOG(INFO) << "[Snapshot:Child] " << log_buffer;
             }
 
-            HandleChildExit(pid, status, snapshot_id);
+            bool success = HandleChildExit(pid, status, snapshot_id);
             auto elapsed =
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - start_time)
                     .count();
             MasterMetricManager::instance().set_snapshot_duration_ms(elapsed);
-            return;
+            return success;
         }
     }
 }
@@ -2767,7 +2793,7 @@ void MasterService::HandleChildTimeout(pid_t pid,
     }
 }
 
-void MasterService::HandleChildExit(pid_t pid, int status,
+bool MasterService::HandleChildExit(pid_t pid, int status,
                                     const std::string& snapshot_id) {
     if (WIFEXITED(status)) {
         int exit_code = WEXITSTATUS(status);
@@ -2776,11 +2802,13 @@ void MasterService::HandleChildExit(pid_t pid, int status,
                        << exit_code << ", snapshot_id=" << snapshot_id
                        << ", child_pid=" << pid;
             MasterMetricManager::instance().inc_snapshot_fail();
+            return false;
         } else {
             LOG(INFO) << "[Snapshot] Child process successfully persisted "
                          "state, snapshot_id="
                       << snapshot_id << ", child_pid=" << pid;
             MasterMetricManager::instance().inc_snapshot_success();
+            return true;
         }
     } else if (WIFSIGNALED(status)) {
         int signal = WTERMSIG(status);
@@ -2788,11 +2816,13 @@ void MasterService::HandleChildExit(pid_t pid, int status,
                    << signal << ", snapshot_id=" << snapshot_id
                    << ", child_pid=" << pid;
         MasterMetricManager::instance().inc_snapshot_fail();
+        return false;
     }
+    return false;
 }
 
 tl::expected<void, SerializationError> MasterService::PersistState(
-    const std::string& snapshot_id) {
+    const std::string& snapshot_id, uint64_t* out_seq_id) {
     try {
         auto serializer_type_str = "messagepack";
 
@@ -2800,10 +2830,13 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             "[Snapshot] action=persisting_state start, snapshot_id={}, "
             "serializer_type={}, version={}",
             snapshot_id, serializer_type_str, SNAPSHOT_SERIALIZER_VERSION);
+        uint64_t last_seq_id = 0;
         std::vector<uint8_t> serialized_metadata;
         std::vector<uint8_t> serialized_segment;
         {
             std::unique_lock<std::shared_mutex> lock(SNAPSHOT_MUTEX);
+            last_seq_id = oplog_manager_.GetLastSequenceId();
+
             MetadataSerializer metadata_serializer(this);
             SegmentSerializer segment_serializer(&segment_manager_);
 
@@ -2838,6 +2871,10 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             serialized_segment = std::move(segment_result.value());
         }
 
+        if (out_seq_id) {
+            *out_seq_id = last_seq_id;
+        }
+
         // Create storage path prefix
         std::string path_prefix = SNAPSHOT_ROOT + "/" + snapshot_id + "/";
 
@@ -2859,7 +2896,6 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch())
                 .count();
-        uint64_t last_seq_id = oplog_manager_.GetLastSequenceId();
         
         // Format: protocol|version|snapshot_id|meta_size|meta_crc|seg_size|seg_crc|timestamp|status|oplog_seq_id
         std::string manifest_content =

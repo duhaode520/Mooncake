@@ -125,6 +125,14 @@ size_t OpLogManager::GetEntryCount() const {
     return buffer_.size();
 }
 
+ErrorCode OpLogManager::CleanupOpLogBefore(uint64_t before_sequence_id) {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    if (!etcd_oplog_store_) {
+        return ErrorCode::OK;
+    }
+    return etcd_oplog_store_->CleanupOpLogBefore(before_sequence_id);
+}
+
 uint64_t OpLogManager::NowMs() {
     using namespace std::chrono;
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch())

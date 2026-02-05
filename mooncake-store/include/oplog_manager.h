@@ -98,6 +98,10 @@ class OpLogManager {
     // Current number of entries in the buffer.
     size_t GetEntryCount() const;
 
+    // Clean up OpLog entries in etcd before a given sequence_id.
+    // Delegates to EtcdOpLogStore::CleanupOpLogBefore.
+    ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id);
+
     // Verify checksum of an OpLogEntry payload.
     // Returns true if checksum matches, false otherwise.
     // This is public so OpLogWatcher and OpLogApplier can validate entries.

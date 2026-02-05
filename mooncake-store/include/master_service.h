@@ -443,7 +443,7 @@ class MasterService {
 
     // Persist master state
     tl::expected<void, SerializationError> PersistState(
-        const std::string& snapshot_id);
+        const std::string& snapshot_id, uint64_t* out_seq_id = nullptr);
 
     tl::expected<void, SerializationError> UploadSnapshotFile(
         const std::vector<uint8_t>& data, const std::string& path,
@@ -461,11 +461,11 @@ class MasterService {
     // Restore master state
     void RestoreState();
 
-    void WaitForSnapshotChild(pid_t pid, const std::string& snapshot_id,
+    bool WaitForSnapshotChild(pid_t pid, const std::string& snapshot_id,
                               int log_pipe_fd);
 
     void HandleChildTimeout(pid_t pid, const std::string& snapshot_id);
-    void HandleChildExit(pid_t pid, int status, const std::string& snapshot_id);
+    bool HandleChildExit(pid_t pid, int status, const std::string& snapshot_id);
 
     // BatchEvict evicts objects in a near-LRU way, i.e., prioritizes to evict
     // object with smaller lease timeout. It has two passes. The first pass only
