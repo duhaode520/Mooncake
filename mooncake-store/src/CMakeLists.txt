@@ -24,6 +24,7 @@ set(MOONCAKE_STORE_SOURCES
     dummy_client.cpp
     http_metadata_server.cpp
     file_storage.cpp
+    serializer_snapshot_provider.cpp
     serialize/serializer.cpp
     serialize/serializer_backend.cpp
     utils/crc32c_util.cpp

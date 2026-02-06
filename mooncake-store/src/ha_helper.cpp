@@ -8,6 +8,7 @@
 #include "etcd_helper.h"
 #include "hot_standby_service.h"
 #include "rpc_service.h"
+#include "serializer_snapshot_provider.h"
 
 namespace mooncake {
 
@@ -315,21 +316,27 @@ void MasterServiceSupervisor::StartStandbyService(MasterViewHelper& mv_helper,
     standby_config.max_replication_lag_entries = 1000;
     standby_config.enable_verification = false;  // Disable verification for now
 
-    // Snapshot bootstrap:
-    // - Only supported for ETCD snapshot backend currently.
-    // - If enabled, standby will load a snapshot first (from etcd) and then
-    //   replay OpLog from snapshot_sequence_id.
-    standby_config.enable_snapshot_bootstrap =
-        (config_.snapshot_backend_type == SnapshotBackendType::ETCD);
+    // Snapshot bootstrap (default for new standby nodes):
+    // - In HA mode, snapshot backend is forced to ETCD (shared by all nodes).
+    // - `enable_snapshot_restore` is ignored for primary startup.
+    // - Standby nodes should always *try* snapshot bootstrap first, then replay
+    //   OpLog from snapshot_sequence_id.
+    standby_config.enable_snapshot_bootstrap = true;
     LOG(INFO) << "Standby snapshot bootstrap: "
               << (standby_config.enable_snapshot_bootstrap ? "enabled" : "disabled")
-              << ", snapshot_backend="
-              << SnapshotBackendTypeToString(config_.snapshot_backend_type)
+              << ", snapshot_backend=etcd"
               << ", enable_snapshot=" << (config_.enable_snapshot ? 1 : 0)
-              << ", enable_snapshot_restore="
-              << (config_.enable_snapshot_restore ? 1 : 0);
+              << ", enable_snapshot_restore_ignored=1";
 
+    // Inject a snapshot provider matching the configured backend.
+    // MasterService uses SNAPSHOT_ROOT="master_snapshot".
     standby_service_ = std::make_unique<HotStandbyService>(standby_config);
+    standby_service_->SetSnapshotProvider(
+        std::make_unique<SerializerBackendSnapshotProvider>(
+            /*backend_type=*/SnapshotBackendType::ETCD,
+            /*etcd_endpoints=*/config_.etcd_endpoints,
+            /*memory_allocator_type=*/config_.memory_allocator,
+            /*snapshot_root=*/"master_snapshot"));
 
     ErrorCode err = standby_service_->Start(
         current_leader, config_.etcd_endpoints, config_.cluster_id);

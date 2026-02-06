@@ -120,6 +120,19 @@ class MasterService {
         const std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot,
         uint64_t initial_oplog_sequence_id);
 
+        // Export the current in-memory metadata state into StandbyObjectMetadata.
+        // This is primarily used by standby snapshot bootstrap after restoring a
+        // snapshot via RestoreState().
+        void ExportStandbySnapshot(
+            std::vector<std::pair<std::string, StandbyObjectMetadata>>& out,
+            uint64_t last_sequence_id, bool include_memory_replicas = true) const;
+
+        // Get current OpLog last sequence_id (used to align standby baseline).
+        uint64_t GetOpLogLastSequenceId() const;
+
+        // Whether RestoreState() successfully restored from a snapshot.
+        bool RestoredFromSnapshot() const;
+
     /**
      * @brief Fetch all segments, each node has a unique real client with fixed
      * segment name : segment name, preferred format : {ip}:{port}, bad format :
@@ -1160,6 +1173,9 @@ class MasterService {
 
     bool enable_snapshot_restore_ = false;
     bool enable_snapshot_restore_clean_metadata_ = true;
+
+    bool restored_from_snapshot_ = false;
+    std::string restored_snapshot_id_;
 
     bool enable_snapshot_ = false;
     std::string snapshot_backup_dir_ = DEFAULT_SNAPSHOT_BACKUP_DIR;

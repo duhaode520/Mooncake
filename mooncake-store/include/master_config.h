@@ -161,8 +161,15 @@ class MasterServiceSupervisorConfig {
         snapshot_backup_dir = config.snapshot_backup_dir;
         snapshot_interval_seconds = config.snapshot_interval_seconds;
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
-        snapshot_backend_type =
-            ParseSnapshotBackendType(config.snapshot_backend_type);
+        // HA mode policy: force ETCD snapshot backend (ignore configured backend).
+        // IMPORTANT: Do not parse the configured backend first, since it may
+        // throw (e.g. S3 requested without AWS SDK). In HA mode we always use ETCD.
+        if (config.enable_ha) {
+            snapshot_backend_type = SnapshotBackendType::ETCD;
+        } else {
+            snapshot_backend_type =
+                ParseSnapshotBackendType(config.snapshot_backend_type);
+        }
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;
@@ -340,13 +347,19 @@ class WrappedMasterServiceConfig {
         put_start_release_timeout_sec = config.put_start_release_timeout_sec;
 
         enable_snapshot = config.enable_snapshot;
-        enable_snapshot_restore = config.enable_snapshot_restore;
+        // In HA mode, this process becomes the primary master only after leader
+        // election (and potentially standby promotion). Primary master should
+        // NOT restore its state from snapshot backend at startup; standby nodes
+        // perform snapshot bootstrap via HotStandbyService.
+        // Therefore, `enable_snapshot_restore` is ignored in HA mode.
+        enable_snapshot_restore = false;
         enable_snapshot_restore_clean_metadata =
             config.enable_snapshot_restore_clean_metadata;
         snapshot_backup_dir = config.snapshot_backup_dir;
         snapshot_interval_seconds = config.snapshot_interval_seconds;
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
-        snapshot_backend_type = config.snapshot_backend_type;
+        // HA mode policy: force ETCD snapshot backend.
+        snapshot_backend_type = SnapshotBackendType::ETCD;
         etcd_endpoints = config.etcd_endpoints;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;

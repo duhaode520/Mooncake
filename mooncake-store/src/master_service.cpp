@@ -440,6 +440,41 @@ void MasterService::RestoreFromStandbySnapshot(
               << restored << ", initial_oplog_sequence_id=" << initial_oplog_sequence_id;
 }
 
+void MasterService::ExportStandbySnapshot(
+    std::vector<std::pair<std::string, StandbyObjectMetadata>>& out,
+    uint64_t last_sequence_id, bool include_memory_replicas) const {
+    out.clear();
+    for (size_t shard_idx = 0; shard_idx < kNumShards; ++shard_idx) {
+        MetadataShardAccessorRO shard(this, shard_idx);
+        for (const auto& kv : shard->metadata) {
+            const std::string& key = kv.first;
+            const ObjectMetadata& om = kv.second;
+
+            StandbyObjectMetadata sm;
+            sm.client_id = om.client_id;
+            sm.size = static_cast<uint64_t>(om.size);
+            sm.last_sequence_id = last_sequence_id;
+
+            const auto& reps = om.GetAllReplicas();
+            sm.replicas.reserve(reps.size());
+            for (const auto& rep : reps) {
+                if (!include_memory_replicas && rep.is_memory_replica()) {
+                    continue;
+                }
+                sm.replicas.emplace_back(rep.get_descriptor());
+            }
+
+            out.emplace_back(key, std::move(sm));
+        }
+    }
+}
+
+uint64_t MasterService::GetOpLogLastSequenceId() const {
+    return oplog_manager_.GetLastSequenceId();
+}
+
+bool MasterService::RestoredFromSnapshot() const { return restored_from_snapshot_; }
+
 MasterService::~MasterService() {
     // Stop and join the threads
     eviction_running_ = false;
@@ -3227,6 +3262,9 @@ void MasterService::CleanupOldSnapshot(int keep_count,
 
 void MasterService::RestoreState() {
     try {
+        restored_from_snapshot_ = false;
+        restored_snapshot_id_.clear();
+
         auto now = std::chrono::system_clock::now();
 
         LOG(INFO) << "[Restore] Backend info: "
@@ -3456,8 +3494,10 @@ void MasterService::RestoreState() {
         {
             // After deserialization, iterate through metadata_shards_ to clean
             // up non-ready metadata
-            const bool skip_cleanup = std::getenv(
+            const bool env_skip_cleanup = std::getenv(
                 "MOONCAKE_MASTER_SERVICE_SNAPSHOT_TEST_SKIP_CLEANUP");
+            const bool skip_cleanup =
+                env_skip_cleanup || !enable_snapshot_restore_clean_metadata_;
             if (!skip_cleanup) {
                 for (auto& shard : metadata_shards_) {
                     for (auto it = shard.metadata.begin();
@@ -3584,6 +3624,9 @@ void MasterService::RestoreState() {
 
         LOG(INFO) << "[Restore] Successfully restored state from snapshot: "
                   << restored_snapshot_id;
+
+        restored_from_snapshot_ = true;
+        restored_snapshot_id_ = restored_snapshot_id;
 
     } catch (const std::exception& e) {
         LOG(ERROR) << "[Restore] Exception during state restoration: "
