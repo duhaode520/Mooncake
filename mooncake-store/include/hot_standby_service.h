@@ -210,7 +210,7 @@ class HotStandbyService {
         std::unordered_map<std::string, StandbyObjectMetadata> store_;
     };
     std::unique_ptr<StandbyMetadataStore> metadata_store_;
-    std::unique_ptr<SnapshotProvider> snapshot_provider_{std::make_unique<NoopSnapshotProvider>()};
+    std::unique_ptr<SnapshotProvider> snapshot_provider_;
 
     // OpLog replication components
     std::unique_ptr<OpLogApplier> oplog_applier_;

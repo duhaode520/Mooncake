@@ -1,12 +1,95 @@
 #include "etcd_snapshot_provider.h"
 #include <glog/logging.h>
 #include <boost/algorithm/string.hpp>
+#include <optional>
 #include "serialize/serializer_backend.h"
-#include "utils/utils.h" 
+#include "types.h"
 #include "utils/zstd_util.h"
 #include <msgpack.hpp>
 
 namespace mooncake {
+
+namespace {
+
+struct LatestSnapshotCandidate {
+    std::string snapshot_id;
+    std::optional<uint64_t> ts;
+};
+
+std::optional<uint64_t> ParseUint64Loose(const std::string& s) {
+    if (s.empty()) return std::nullopt;
+    for (char c : s) {
+        if (c < '0' || c > '9') return std::nullopt;
+    }
+    try {
+        return std::stoull(s);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+// latest.txt may be:
+// - a single snapshot_id (often a timestamp string)
+// - a single line: "<ts>|<snapshot_id>"
+// - multiple lines recording history; pick the newest by ts.
+std::optional<LatestSnapshotCandidate> ParseLatestSnapshot(const std::string& content) {
+    std::vector<std::string> lines;
+    boost::split(lines, content, boost::is_any_of("\n"));
+
+    std::optional<LatestSnapshotCandidate> best;
+    for (auto& raw : lines) {
+        std::string line = raw;
+        boost::trim(line);
+        if (line.empty()) continue;
+
+        LatestSnapshotCandidate cand;
+        cand.snapshot_id = line;
+
+        auto pipe_pos = line.rfind('|');
+        if (pipe_pos != std::string::npos) {
+            std::string ts_str = line.substr(0, pipe_pos);
+            std::string id_str = line.substr(pipe_pos + 1);
+            boost::trim(ts_str);
+            boost::trim(id_str);
+            if (!id_str.empty()) {
+                cand.snapshot_id = id_str;
+            }
+            cand.ts = ParseUint64Loose(ts_str);
+        } else {
+            cand.ts = ParseUint64Loose(line);
+        }
+
+        if (cand.snapshot_id.empty()) {
+            continue;
+        }
+
+        if (!best.has_value()) {
+            best = cand;
+            continue;
+        }
+
+        // Prefer the candidate with a larger timestamp.
+        if (cand.ts.has_value() && best->ts.has_value()) {
+            if (cand.ts.value() >= best->ts.value()) {
+                best = cand;
+            }
+            continue;
+        }
+        if (cand.ts.has_value() && !best->ts.has_value()) {
+            best = cand;
+            continue;
+        }
+        if (!cand.ts.has_value() && best->ts.has_value()) {
+            continue;
+        }
+
+        // Neither has ts: keep the later non-empty line.
+        best = cand;
+    }
+    return best;
+}
+
+}  // namespace
 
 EtcdSnapshotProvider::EtcdSnapshotProvider(const std::string& etcd_endpoints,
                                            const std::string& snapshot_root)
@@ -24,6 +107,8 @@ bool EtcdSnapshotProvider::LoadLatestSnapshot(
     // But original MasterService code uses SNAPSHOT_ROOT + "/" + SNAPSHOT_LATEST_FILE 
     // where SNAPSHOT_ROOT is configurable. 
     // Assuming snapshot_root_ passed here is equivalent to MasterService's SNAPSHOT_ROOT.
+    (void)cluster_id;  // Snapshot path is global in current MasterService layout.
+
     std::string latest_path = snapshot_root_ + "/latest.txt";
     std::string latest_content;
     if (!backend_->DownloadString(latest_path, latest_content)) {
@@ -31,15 +116,18 @@ bool EtcdSnapshotProvider::LoadLatestSnapshot(
         return false;
     }
     
-    // Trim and parse ID
-    std::string id_str = latest_content;
-    boost::trim(id_str); 
-    // Handle "ts|id" format if present
-    auto pipe_pos = id_str.rfind('|');
-    snapshot_id = (pipe_pos == std::string::npos) ? id_str : id_str.substr(pipe_pos + 1);
-    
-    if (snapshot_id.empty()) {
+    auto latest = ParseLatestSnapshot(latest_content);
+    if (!latest.has_value() || latest->snapshot_id.empty()) {
+        LOG(WARNING) << "[Standby] latest.txt is present but no valid snapshot id parsed";
         return false;
+    }
+
+    snapshot_id = latest->snapshot_id;
+    if (latest->ts.has_value()) {
+        LOG(INFO) << "[Standby] Latest snapshot selected: ts=" << latest->ts.value()
+                  << ", snapshot_id=" << snapshot_id;
+    } else {
+        LOG(INFO) << "[Standby] Latest snapshot selected: snapshot_id=" << snapshot_id;
     }
 
     std::string prefix = snapshot_root_ + "/" + snapshot_id + "/";
@@ -63,6 +151,9 @@ bool EtcdSnapshotProvider::LoadLatestSnapshot(
         } catch (...) {
             LOG(WARNING) << "[Standby] Failed to parse oplog_seq_id from manifest";
         }
+    } else {
+        LOG(WARNING) << "[Standby] Invalid manifest format (parts=" << parts.size()
+                     << "), cannot parse oplog_seq_id";
     }
     LOG(INFO) << "[Standby] Snapshot " << snapshot_id << " has sequence_id=" << snapshot_sequence_id;
 
@@ -98,14 +189,24 @@ bool EtcdSnapshotProvider::LoadLatestSnapshot(
         else if (key == "oplog_sequence_id") oplog_seq_obj = &obj.via.map.ptr[i].val;
     }
 
-    // Double check sequence id from metadata body (integrity check)
+    // Double check sequence id from metadata body (integrity check).
+    // IMPORTANT: Do not overwrite a valid manifest seq_id with a zero value.
     if (oplog_seq_obj) {
         uint64_t meta_seq_id = oplog_seq_obj->as<uint64_t>();
-        if (snapshot_sequence_id > 0 && snapshot_sequence_id != meta_seq_id) {
-            LOG(WARNING) << "[Standby] Manifest seq_id (" << snapshot_sequence_id 
-                         << ") mismatches metadata seq_id (" << meta_seq_id << ")";
+        if (meta_seq_id == 0) {
+            if (snapshot_sequence_id > 0) {
+                LOG(WARNING) << "[Standby] Metadata oplog_sequence_id is 0; keeping manifest seq_id="
+                             << snapshot_sequence_id;
+            } else {
+                LOG(WARNING) << "[Standby] Both manifest seq_id and metadata oplog_sequence_id are 0";
+            }
+        } else {
+            if (snapshot_sequence_id > 0 && snapshot_sequence_id != meta_seq_id) {
+                LOG(WARNING) << "[Standby] Manifest seq_id (" << snapshot_sequence_id
+                             << ") mismatches metadata seq_id (" << meta_seq_id << ")";
+            }
+            snapshot_sequence_id = meta_seq_id;
         }
-        snapshot_sequence_id = meta_seq_id;
     }
 
     if (!shards_obj || shards_obj->type != msgpack::type::MAP) {

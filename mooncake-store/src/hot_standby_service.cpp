@@ -13,6 +13,10 @@
 #include "oplog_manager.h"
 #include "oplog_watcher.h"
 
+#ifdef STORE_USE_ETCD
+#include "etcd_snapshot_provider.h"
+#endif
+
 namespace mooncake {
 
 HotStandbyService::HotStandbyService(const HotStandbyConfig& config)
@@ -139,6 +143,24 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     etcd_endpoints_ = etcd_endpoints;
     cluster_id_ = cluster_id;
 
+    // If snapshot bootstrap is enabled but no provider is injected, create the
+    // default ETCD snapshot provider so real deployments don't silently fall
+    // back to OpLog-only bootstrap.
+#ifdef STORE_USE_ETCD
+    if (config_.enable_snapshot_bootstrap && !snapshot_provider_) {
+        static constexpr const char* kDefaultSnapshotRoot = "master_snapshot";
+        snapshot_provider_ = std::make_unique<EtcdSnapshotProvider>(
+            etcd_endpoints_, /*snapshot_root=*/kDefaultSnapshotRoot);
+        LOG(INFO) << "Snapshot bootstrap enabled: created default EtcdSnapshotProvider, root="
+                  << kDefaultSnapshotRoot;
+    }
+#else
+    if (config_.enable_snapshot_bootstrap && !snapshot_provider_) {
+        LOG(WARNING) << "Snapshot bootstrap enabled but STORE_USE_ETCD is not set; "
+                        "cannot create default snapshot provider";
+    }
+#endif
+
 #ifdef STORE_USE_ETCD
     // Connect to etcd
     ErrorCode err = EtcdHelper::ConnectToEtcdStoreClient(etcd_endpoints.c_str());
@@ -186,15 +208,38 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     // - If we already have local state (warm start), do NOT reload snapshot.
     // - Otherwise (cold start/new standby), try snapshot (if enabled) then replay OpLog.
     uint64_t baseline_seq_id = has_local_state ? local_last_seq_id : 0;
+    if (!has_local_state && config_.enable_snapshot_bootstrap) {
+        if (!snapshot_provider_) {
+            LOG(WARNING) << "Snapshot bootstrap enabled but snapshot_provider is null; "
+                            "falling back to OpLog-only bootstrap";
+        }
+    }
     if (!has_local_state && config_.enable_snapshot_bootstrap && snapshot_provider_) {
         std::string snapshot_id;
         uint64_t snapshot_seq_id = 0;
         std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
-        if (snapshot_provider_->LoadLatestSnapshot(cluster_id_, snapshot_id, snapshot_seq_id,
-                                                   snapshot)) {
+
+        bool loaded = false;
+        // Snapshot pointer in etcd may appear slightly later than OpLog keys
+        // (e.g., right after a leader switch). Retry briefly to avoid falling
+        // back to OpLog-only bootstrap due to a transient race.
+        for (int attempt = 0; attempt < 3 && !loaded; ++attempt) {
+            loaded = snapshot_provider_->LoadLatestSnapshot(
+                cluster_id_, snapshot_id, snapshot_seq_id, snapshot);
+            if (!loaded && attempt < 2) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+        }
+
+        if (loaded) {
             LOG(INFO) << "Loaded snapshot: snapshot_id=" << snapshot_id
                       << ", snapshot_seq_id=" << snapshot_seq_id
                       << ", keys=" << snapshot.size();
+            if (snapshot_seq_id == 0 && !snapshot.empty()) {
+                LOG(ERROR) << "Loaded non-empty snapshot but snapshot_seq_id is 0. "
+                              "This will likely cause persistent missing seq_id warnings. "
+                              "Check snapshot manifest/metadata serialization.";
+            }
             // Apply snapshot into local standby store.
             for (const auto& kv : snapshot) {
                 metadata_store_->PutMetadata(kv.first, kv.second);
@@ -203,7 +248,8 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
             oplog_applier_->Recover(snapshot_seq_id);
             baseline_seq_id = snapshot_seq_id;
         } else {
-            LOG(INFO) << "No snapshot available (or provider not ready), falling back to OpLog-only bootstrap";
+            LOG(WARNING) << "Snapshot bootstrap enabled but no snapshot is available yet; "
+                            "falling back to OpLog-only bootstrap (this may fail if old OpLogs were GC'd)";
         }
     }
 

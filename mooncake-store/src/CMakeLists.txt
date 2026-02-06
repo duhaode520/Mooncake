@@ -39,6 +39,10 @@ set(MOONCAKE_STORE_SOURCES
     ha_metric_manager.cpp
 )
 
+if (STORE_USE_ETCD)
+    list(APPEND MOONCAKE_STORE_SOURCES etcd_snapshot_provider.cpp)
+endif()
+
 set(EXTRA_LIBS "")
 
 # Find AWS SDK

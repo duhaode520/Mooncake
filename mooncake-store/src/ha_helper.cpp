@@ -315,6 +315,20 @@ void MasterServiceSupervisor::StartStandbyService(MasterViewHelper& mv_helper,
     standby_config.max_replication_lag_entries = 1000;
     standby_config.enable_verification = false;  // Disable verification for now
 
+    // Snapshot bootstrap:
+    // - Only supported for ETCD snapshot backend currently.
+    // - If enabled, standby will load a snapshot first (from etcd) and then
+    //   replay OpLog from snapshot_sequence_id.
+    standby_config.enable_snapshot_bootstrap =
+        (config_.snapshot_backend_type == SnapshotBackendType::ETCD);
+    LOG(INFO) << "Standby snapshot bootstrap: "
+              << (standby_config.enable_snapshot_bootstrap ? "enabled" : "disabled")
+              << ", snapshot_backend="
+              << SnapshotBackendTypeToString(config_.snapshot_backend_type)
+              << ", enable_snapshot=" << (config_.enable_snapshot ? 1 : 0)
+              << ", enable_snapshot_restore="
+              << (config_.enable_snapshot_restore ? 1 : 0);
+
     standby_service_ = std::make_unique<HotStandbyService>(standby_config);
 
     ErrorCode err = standby_service_->Start(
