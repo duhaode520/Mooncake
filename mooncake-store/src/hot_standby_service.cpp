@@ -548,6 +548,17 @@ void HotStandbyService::ReplicationLoop() {
     // in its own thread. This loop now just monitors the status and updates
     // metrics.
 
+    // Create EtcdOpLogStore once before the loop to avoid repeated
+    // construction/destruction overhead (constructor does etcd I/O and
+    // spawns background threads).
+#ifdef STORE_USE_ETCD
+    std::unique_ptr<EtcdOpLogStore> oplog_store;
+    if (!cluster_id_.empty()) {
+        oplog_store = std::make_unique<EtcdOpLogStore>(
+            cluster_id_, /*enable_latest_seq_batch_update=*/false);
+    }
+#endif
+
     while (IsRunning()) {
         if (!IsConnected()) {
             // Not connected - wait a bit before checking again
@@ -566,10 +577,9 @@ void HotStandbyService::ReplicationLoop() {
         // Update primary_seq_id by querying etcd `/latest` (best-effort).
         // Note: `/latest` is batch-updated on Primary, so this is for monitoring only.
 #ifdef STORE_USE_ETCD
-        if (!cluster_id_.empty()) {
-            EtcdOpLogStore oplog_store(cluster_id_, /*enable_latest_seq_batch_update=*/false);
+        if (oplog_store) {
             uint64_t latest_seq = 0;
-            ErrorCode err = oplog_store.GetLatestSequenceId(latest_seq);
+            ErrorCode err = oplog_store->GetLatestSequenceId(latest_seq);
             if (err == ErrorCode::OK) {
                 primary_seq_id_.store(latest_seq);
             }
