@@ -407,6 +407,14 @@ ErrorCode EtcdHelper::BatchCreate(const std::vector<std::string>& keys,
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
 
+ErrorCode EtcdHelper::BatchCreate(const std::vector<std::string>& keys,
+                                  const std::vector<std::string>& values) {
+    (void)keys;
+    (void)values;
+    LOG(FATAL) << "Etcd is not enabled in compilation";
+    return ErrorCode::ETCD_OPERATION_ERROR;
+}
+
 ErrorCode EtcdHelper::GrantLease(int64_t lease_ttl, EtcdLeaseId& lease_id) {
     LOG(FATAL) << "Etcd is not enabled in compilation";
     return ErrorCode::ETCD_OPERATION_ERROR;
