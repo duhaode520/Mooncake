@@ -39,8 +39,11 @@ class EtcdOpLogStoreTest : public ::testing::Test {
         GTEST_SKIP() << "STORE_USE_ETCD is disabled, skipping EtcdOpLogStore tests.";
 #else
         cluster_id_ = "test_cluster_etcd_oplog_store";
-        store_ = std::make_unique<EtcdOpLogStore>(cluster_id_,
-                                                  /*enable_latest_seq_batch_update=*/false);
+        store_ = std::make_unique<EtcdOpLogStore>(
+            cluster_id_,
+            /*enable_latest_seq_batch_update=*/false,
+            /*enable_batch_write=*/true);
+        ASSERT_EQ(ErrorCode::OK, store_->Init());
         CleanupTestData();
 #endif
     }
@@ -260,7 +263,9 @@ TEST_F(EtcdOpLogStoreTest, TestUpdateLatestSequenceId) {
 TEST_F(EtcdOpLogStoreTest, TestBatchUpdate_EnabledAndThreshold) {
     // Use a store with batch enabled, then verify /latest is updated to the max seq
     EtcdOpLogStore writer(cluster_id_,
-                          /*enable_latest_seq_batch_update=*/true);
+                          /*enable_latest_seq_batch_update=*/true,
+                          /*enable_batch_write=*/true);
+    ASSERT_EQ(ErrorCode::OK, writer.Init());
 
     const uint64_t base_seq = 1000;
     const int kEntries = 5;
@@ -329,7 +334,10 @@ TEST_F(EtcdOpLogStoreTest, TestInvalidClusterId_Rejected) {
 TEST_F(EtcdOpLogStoreTest, TestClusterIdNormalization) {
     // Trailing slashes should be normalized away from the cluster_id
     std::string raw_cluster = cluster_id_ + "///";
-    EtcdOpLogStore normalized_store(raw_cluster, false);
+    EtcdOpLogStore normalized_store(raw_cluster,
+                                    /*enable_latest_seq_batch_update=*/false,
+                                    /*enable_batch_write=*/true);
+    ASSERT_EQ(ErrorCode::OK, normalized_store.Init());
 
     OpLogEntry e = MakeEntry(999, OpType::PUT_END, "norm-key", "norm-val");
     ASSERT_EQ(ErrorCode::OK, normalized_store.WriteOpLog(e));

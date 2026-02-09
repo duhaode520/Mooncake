@@ -156,9 +156,10 @@ TEST_F(HotStandbyServiceTest, TestGetSyncStatus) {
 // ========== 6.1.4 Promotion tests ==========
 
 TEST_F(HotStandbyServiceTest, TestPromote_WhenNotReady) {
-    // In the initial state promotion preconditions are not met, so it should return nullptr
-    auto master = service_->Promote();
-    EXPECT_EQ(nullptr, master);
+    // In the initial state promotion preconditions are not met, so it should
+    // return an error code (not OK).
+    ErrorCode err = service_->Promote();
+    EXPECT_NE(ErrorCode::OK, err);
 }
 
 TEST_F(HotStandbyServiceTest, TestPromote_WhenReady) {
@@ -166,9 +167,10 @@ TEST_F(HotStandbyServiceTest, TestPromote_WhenReady) {
     GTEST_SKIP()
         << "Requires real etcd and full replication pipeline to reach ready state.";
 #else
-    // Even in non-etcd mode, Promote should safely return nullptr
-    auto master = service_->Promote();
-    EXPECT_EQ(nullptr, master);
+    // Even in non-etcd mode, Promote should safely return OK (simulated
+    // success)
+    ErrorCode err = service_->Promote();
+    EXPECT_EQ(ErrorCode::OK, err);
 #endif
 }
 
@@ -177,8 +179,8 @@ TEST_F(HotStandbyServiceTest, TestPromote_FinalCatchUp) {
     GTEST_SKIP()
         << "Requires real etcd and OpLog data to exercise final catch-up logic.";
 #else
-    auto master = service_->Promote();
-    EXPECT_EQ(nullptr, master);
+    ErrorCode err = service_->Promote();
+    EXPECT_EQ(ErrorCode::OK, err);
 #endif
 }
 
@@ -187,8 +189,8 @@ TEST_F(HotStandbyServiceTest, TestPromote_WithGaps) {
     GTEST_SKIP()
         << "Requires real etcd and gaps in OpLog to validate gap resolution.";
 #else
-    auto master = service_->Promote();
-    EXPECT_EQ(nullptr, master);
+    ErrorCode err = service_->Promote();
+    EXPECT_EQ(ErrorCode::OK, err);
 #endif
 }
 
@@ -197,8 +199,8 @@ TEST_F(HotStandbyServiceTest, TestPromote_Timeout) {
     GTEST_SKIP()
         << "Requires real etcd and slow reads to trigger catch-up timeout.";
 #else
-    auto master = service_->Promote();
-    EXPECT_EQ(nullptr, master);
+    ErrorCode err = service_->Promote();
+    EXPECT_EQ(ErrorCode::OK, err);
 #endif
 }
 
