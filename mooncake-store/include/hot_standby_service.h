@@ -34,7 +34,8 @@ struct HotStandbyConfig {
     uint32_t replication_port{0};
     uint32_t verification_interval_sec{30};
     uint32_t max_replication_lag_entries{1000};
-    bool enable_verification{true};
+    // 默认关闭数据校验线程，如需开启请显式将 enable_verification 设为 true
+    bool enable_verification{false};
 
     // Snapshot bootstrap (optional):
     // If provided, Standby will try to load a snapshot first, then replay OpLog
