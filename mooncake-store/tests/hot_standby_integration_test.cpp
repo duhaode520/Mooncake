@@ -310,9 +310,10 @@ TEST_F(HotStandbyIntegrationTest, TestStandbyPromotion) {
         << "Standby should be ready for promotion";
 
     // 4. Perform promotion
-    auto master = standby.Promote();
-    // Note: Promote() returns nullptr as MasterService creation is handled externally
-    EXPECT_EQ(nullptr, master);
+    // Note: `Promote()` returns an `ErrorCode` (MasterService creation is
+    // handled externally), so verify the promotion succeeded.
+    ErrorCode err = standby.Promote();
+    EXPECT_EQ(ErrorCode::OK, err);
 
     // 5. Verify sequence ID after promotion
     uint64_t promoted_seq_id = standby.GetLatestAppliedSequenceId();
@@ -400,8 +401,8 @@ TEST_F(HotStandbyIntegrationTest, TestFailoverScenario) {
 
     // 5. Perform promotion (simulate failover)
     ASSERT_TRUE(standby.IsReadyForPromotion());
-    auto master = standby.Promote();
-    EXPECT_EQ(nullptr, master);
+    ErrorCode promote_err = standby.Promote();
+    EXPECT_EQ(ErrorCode::OK, promote_err);
 
     // 6. Verify state after promotion
     uint64_t promoted_seq_id = standby.GetLatestAppliedSequenceId();

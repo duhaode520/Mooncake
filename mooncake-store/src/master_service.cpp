@@ -285,9 +285,12 @@ MasterService::MasterService(const MasterServiceConfig& config)
     if (enable_ha_ && !cluster_id_.empty()) {
         // Try to create EtcdOpLogStore - if etcd is not connected, operations will fail
         // but we can still use memory buffer as fallback
-        // Writer: enable batch update for `/latest` to reduce etcd write pressure.
+        // Writer: enable batch update for `/latest` to reduce etcd write pressure,
+        // and enable batch write so that OpLogManager can persist entries to etcd.
         auto etcd_oplog_store =
-            std::make_shared<EtcdOpLogStore>(cluster_id_, /*enable_latest_seq_batch_update=*/true);
+            std::make_shared<EtcdOpLogStore>(cluster_id_,
+                                             /*enable_latest_seq_batch_update=*/true,
+                                             /*enable_batch_write=*/true);
         oplog_manager_.SetEtcdOpLogStore(etcd_oplog_store);
         // Fence against restart/promotion regressions: initialize OpLogManager
         // to the maximum existing sequence_id in etcd so we don't collide/overwrite.
