@@ -209,8 +209,8 @@ TEST_F(HotStandbyServiceTest, TestPromote_BatchLimit) {
     GTEST_SKIP()
         << "Requires real etcd and large OpLog to hit batch limit.";
 #else
-    auto master = service_->Promote();
-    EXPECT_EQ(nullptr, master);
+    ErrorCode err = service_->Promote();
+    EXPECT_NE(ErrorCode::OK, err);
 #endif
 }
 
@@ -285,8 +285,8 @@ TEST_F(HotStandbyServiceTest, TestReplicationLoop_HandlesDisconnect) {
     GTEST_SKIP()
         << "Requires real etcd and watcher disconnect to exercise disconnect path.";
 #else
-    // Calling DisconnectFromPrimary is currently safe (does not depend on etcd)
-    service_->DisconnectFromPrimary();
+    // DisconnectFromPrimary is private; verify Stop() is safe instead
+    service_->Stop();
     SUCCEED();
 #endif
 }
