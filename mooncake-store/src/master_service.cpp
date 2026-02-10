@@ -291,6 +291,11 @@ MasterService::MasterService(const MasterServiceConfig& config)
             std::make_shared<EtcdOpLogStore>(cluster_id_,
                                              /*enable_latest_seq_batch_update=*/true,
                                              /*enable_batch_write=*/true);
+        if (etcd_oplog_store->Init() != ErrorCode::OK) {
+            LOG(WARNING) << "EtcdOpLogStore::Init() failed for cluster_id="
+                         << cluster_id_
+                         << ", OpLog will fall back to memory buffer";
+        }
         oplog_manager_.SetEtcdOpLogStore(etcd_oplog_store);
         // Fence against restart/promotion regressions: initialize OpLogManager
         // to the maximum existing sequence_id in etcd so we don't collide/overwrite.
