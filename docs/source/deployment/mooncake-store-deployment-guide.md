@@ -33,6 +33,40 @@ This page summarizes useful flags, environment variables, and HTTP endpoints to 
   - `--client_ttl` (int64, default `10` s): Client alive TTL after last ping (HA mode).
   - `--cluster_id` (str, default `mooncake_cluster`): Cluster ID for persistence in HA mode.
 
+### HA quick usage (Master Service)
+
+1. Start an etcd cluster first.
+2. Start at least two `mooncake_master` instances with:
+   - same `--enable_ha=true`
+   - same `--etcd_endpoints` and same `--cluster_id`
+   - different `--rpc_port` (and usually different hosts)
+3. Keep `--rpc_address` as a reachable address of each master node.
+4. On clients, use etcd-based master entry in HA mode: `etcd://<ep1>;<ep2>;...`.
+
+Example (two masters):
+
+```bash
+# node A
+mooncake_master \
+  --enable_ha=true \
+  --etcd_endpoints="192.0.2.10:2379;192.0.2.11:2379" \
+  --cluster_id=prod_cluster \
+  --rpc_address=198.51.100.11 \
+  --rpc_port=50051
+
+# node B
+mooncake_master \
+  --enable_ha=true \
+  --etcd_endpoints="192.0.2.10:2379;192.0.2.11:2379" \
+  --cluster_id=prod_cluster \
+  --rpc_address=198.51.100.12 \
+  --rpc_port=50052
+```
+
+Notes:
+- In HA mode, `enable_snapshot_restore` is ignored.
+- In HA mode, snapshot backend is forced to `etcd`.
+
 - DFS Storage (optional)
   - `--root_fs_dir` (str, default empty): DFS mount directory for storage backend, used in Multi-layer Storage Support.
   - `--global_file_segment_size` (int64, default `int64_max`): Maximum available space for DFS segments.
