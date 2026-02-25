@@ -102,14 +102,32 @@ void RegisterClientRpcService(coro_rpc::coro_rpc_server &server,
 
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-    size_t global_segment_size = string_to_byte_size(FLAGS_global_segment_size);
+
+    ClientConfig client_config;
+    const std::string conf_path = FLAGS_config_path;
+    if (!conf_path.empty()) {
+        mooncake::DefaultConfig default_config;
+        default_config.SetPath(conf_path);
+        try {
+            default_config.Load();
+        } catch (const std::exception& e) {
+            LOG(FATAL) << "Failed to load client config: " << e.what();
+            return 1;
+        }
+        InitClientConf(default_config, client_config);
+    }
+    LoadConfigFromCmdline(client_config, !conf_path.empty());
+
+    size_t global_segment_size =
+        string_to_byte_size(client_config.global_segment_size);
 
     auto client_inst = RealClient::create();
     auto res = client_inst->setup_internal(
-        FLAGS_host, FLAGS_metadata_server, global_segment_size, 0,
-        FLAGS_protocol, FLAGS_device_names, FLAGS_master_server_address,
-        nullptr, "@mooncake_client_" + std::to_string(FLAGS_port) + ".sock",
-        FLAGS_port, FLAGS_enable_offload);
+        client_config.host, client_config.metadata_server, global_segment_size,
+        0, client_config.protocol, client_config.device_names,
+        client_config.master_server_address, nullptr,
+        "@mooncake_client_" + std::to_string(client_config.port) + ".sock",
+        client_config.port, client_config.enable_offload);
     if (!res) {
         LOG(FATAL) << "Failed to setup client: " << toString(res.error());
         return -1;
@@ -120,10 +138,12 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    coro_rpc::coro_rpc_server server(FLAGS_threads, FLAGS_port, "127.0.0.1");
+    coro_rpc::coro_rpc_server server(client_config.threads, client_config.port,
+                                     "127.0.0.1");
     RegisterClientRpcService(server, *client_inst);
 
-    LOG(INFO) << "Starting real client service on 127.0.0.1:" << FLAGS_port;
+    LOG(INFO) << "Starting real client service on 127.0.0.1:"
+              << client_config.port;
 
     return server.start();
 }
