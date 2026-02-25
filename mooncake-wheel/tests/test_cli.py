@@ -3,7 +3,6 @@
 Test script to verify that the mooncake_master entry point works correctly.
 """
 
-import glob
 import json
 import os
 import subprocess
@@ -28,43 +27,60 @@ def cleanup_processes(*procs):
                 pass
 
 
+def check_binary_in_path(name):
+    """Return True if the named binary is found in PATH."""
+    result = subprocess.run(
+        ["which", name], capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"  {name} entry point not found in PATH")
+        return False
+    print(f"  {name} found at: {result.stdout.strip()}")
+    return True
+
+
+def make_client_config(master_port, client_port):
+    """Return a client config dict pointing at the given master and client ports."""
+    return {
+        "host": "0.0.0.0",
+        "metadata_server": "http://127.0.0.1:8080/metadata",
+        "device_names": "",
+        "master_server_address": f"127.0.0.1:{master_port}",
+        "protocol": "tcp",
+        "port": client_port,
+        "global_segment_size": "4 GB",
+        "threads": 1,
+        "enable_offload": False,
+    }
+
+
+def write_temp_config(config):
+    """Write config dict to a temp JSON file and return its path."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(config, f)
+        return f.name
+
+
+def start_master(port):
+    """Start a mooncake_master process on the given port. Returns the Popen object."""
+    return subprocess.Popen(
+        ["mooncake_master", f"--port={port}", "--max_threads=2",
+         "--enable_http_metadata_server=true"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
 def test_entry_point_installed():
     """Test that the entry point is installed and can be executed."""
     try:
-        # Check if mooncake_master is in PATH
-        result = subprocess.run(
-            ["which", "mooncake_master"],
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            print("❌ mooncake_master entry point not found in PATH")
-            return False
-
-        print(f"✅ mooncake_master entry point found at: {result.stdout.strip()}")
-        result = subprocess.run(
-            ["which", "mooncake_client"],
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            print("❌ mooncake_client entry point not found in PATH")
-            return False
-
-        print(f"✅ mooncake_client entry point found at: {result.stdout.strip()}")
-        result = subprocess.run(
-            ["which", "transfer_engine_bench"],
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            print("❌ transfer_engine_bench entry point not found in PATH")
-            return False
-
-        print(f"✅ transfer_engine_bench entry point found at: {result.stdout.strip()}")
+        for binary in ["mooncake_master", "mooncake_client", "transfer_engine_bench"]:
+            if not check_binary_in_path(binary):
+                return False
         return True
     except Exception as e:
         print(f"❌ Error checking for entry point: {e}")
@@ -76,12 +92,7 @@ def test_run_master_and_client():
     process = None
     client_process = None
     try:
-        # Run mooncake_master with a non-default port to avoid conflicts
-        process = subprocess.Popen(
-            ["mooncake_master", "--port=61351", "--max_threads=2", "--enable_http_metadata_server=true"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+        process = start_master(61351)
 
         # Give it a moment to start
         time.sleep(2)
@@ -122,29 +133,12 @@ def test_run_master_and_client():
 
 def test_client_with_config_file():
     """mooncake_client starts successfully when given a valid --config_path."""
-    config = {
-        "host": "0.0.0.0",
-        "metadata_server": "http://127.0.0.1:8080/metadata",
-        "device_names": "",
-        "master_server_address": "127.0.0.1:62351",
-        "protocol": "tcp",
-        "port": 62352,
-        "global_segment_size": "4 GB",
-        "threads": 1,
-        "enable_offload": False,
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(config, f)
-        config_path = f.name
+    config_path = write_temp_config(make_client_config(62351, 62352))
 
     master = None
     client = None
     try:
-        master = subprocess.Popen(
-            ["mooncake_master", "--port=62351", "--max_threads=2",
-             "--enable_http_metadata_server=true"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        master = start_master(62351)
         time.sleep(2)
         if master.poll() is not None:
             print("❌ mooncake_master failed to start for config_file test")
@@ -171,64 +165,51 @@ def test_client_with_config_file():
 
 def test_client_config_cli_override():
     """CLI --port overrides the port value set in config file."""
-    config = {
-        "host": "0.0.0.0",
-        "metadata_server": "http://127.0.0.1:8080/metadata",
-        "device_names": "",
-        "master_server_address": "127.0.0.1:63351",
-        "protocol": "tcp",
-        "port": 63352,        # config file says 63352
-        "global_segment_size": "4 GB",
-        "threads": 1,
-        "enable_offload": False,
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(config, f)
-        config_path = f.name
+    config_port = 63352
+    cli_port = 63353
+    config_path = write_temp_config(make_client_config(63351, config_port))
 
     master = None
     client = None
     try:
-        master = subprocess.Popen(
-            ["mooncake_master", "--port=63351", "--max_threads=2",
-             "--enable_http_metadata_server=true"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        master = start_master(63351)
         time.sleep(2)
         if master.poll() is not None:
-            print("❌ mooncake_master failed to start for cli_override test")
+            print("mooncake_master failed to start for cli_override test")
             return False
 
-        # CLI passes --port=63353, which should win over config file's 63352
+        # CLI passes --port=cli_port, which should win over config file's config_port
         client = subprocess.Popen(
-            ["mooncake_client", f"--config_path={config_path}", "--port=63353"],
+            ["mooncake_client", f"--config_path={config_path}",
+             f"--port={cli_port}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         time.sleep(2)
         if client.poll() is None:
-            # Verify the process bound to CLI port (63353) not config port (63352)
+            # Verify the process bound to the CLI port, not the config port
             pid = client.pid
-            # 63353 in hex is F799, 63352 in hex is F798
+            cli_port_hex = f"{cli_port:04X}"
+            config_port_hex = f"{config_port:04X}"
             try:
                 with open(f"/proc/{pid}/net/tcp", "r") as tcp_file:
                     content = tcp_file.read().upper()
-                    has_cli_port = "F799" in content
-                    has_config_port = "F798" in content
+                    has_cli_port = cli_port_hex in content
+                    has_config_port = config_port_hex in content
                     if has_cli_port and not has_config_port:
-                        print("✅ CLI --port=63353 overrides config file port 63352")
+                        print(f"CLI --port={cli_port} overrides config file port {config_port}")
                         return True
                     elif has_config_port and not has_cli_port:
-                        print("❌ Client is listening on config port 63352, CLI override failed")
+                        print(f"Client is listening on config port {config_port}, CLI override failed")
                         return False
                     else:
-                        print("❌ Could not determine port from /proc/net/tcp")
+                        print("Could not determine port from /proc/net/tcp")
                         return False
             except Exception as e:
-                print(f"❌ Failed to verify port via /proc: {e}")
+                print(f"Failed to verify port via /proc: {e}")
                 return False
         else:
             stdout, stderr = client.communicate()
-            print("❌ mooncake_client failed to start for cli_override test")
+            print("mooncake_client failed to start for cli_override test")
             print(f"stdout: {stdout.decode()}")
             print(f"stderr: {stderr.decode()}")
             return False
@@ -254,30 +235,31 @@ def test_client_invalid_config_path():
 if __name__ == "__main__":
     print("Testing mooncake_master entry point...")
 
-    entry_point_installed = test_entry_point_installed()
+    tests = [
+        ("Entry point installed",          test_entry_point_installed),
+        ("Run master and client",          test_run_master_and_client),
+        ("Client with config file",        test_client_with_config_file),
+        ("CLI overrides config file",      test_client_config_cli_override),
+        ("Invalid config path exits != 0", test_client_invalid_config_path),
+    ]
 
-    if entry_point_installed:
-        run_master_and_client_success = test_run_master_and_client()
-        config_file_success = test_client_with_config_file()
-        cli_override_success = test_client_config_cli_override()
-        invalid_config_success = test_client_invalid_config_path()
-    else:
-        run_master_and_client_success = False
-        config_file_success = False
-        cli_override_success = False
-        invalid_config_success = False
+    results = {}
+    for name, func in tests:
+        results[name] = func()
+        # All remaining tests depend on entry points being installed
+        if name == "Entry point installed" and not results[name]:
+            for remaining_name, _ in tests[1:]:
+                results[remaining_name] = False
+            break
 
     print("\nTest Summary:")
-    print(f"Entry point installed:          {'✅' if entry_point_installed else '❌'}")
-    print(f"Run master and client:          {'✅' if run_master_and_client_success else '❌'}")
-    print(f"Client with config file:        {'✅' if config_file_success else '❌'}")
-    print(f"CLI overrides config file:      {'✅' if cli_override_success else '❌'}")
-    print(f"Invalid config path exits != 0: {'✅' if invalid_config_success else '❌'}")
+    for name, passed in results.items():
+        status = "PASS" if passed else "FAIL"
+        print(f"  [{status}] {name}")
 
-    if all([entry_point_installed, run_master_and_client_success,
-            config_file_success, cli_override_success, invalid_config_success]):
-        print("\nAll tests passed! 🎉")
+    if all(results.values()):
+        print("\nAll tests passed!")
         sys.exit(0)
     else:
-        print("\nSome tests failed. 😢")
+        print("\nSome tests failed.")
         sys.exit(1)

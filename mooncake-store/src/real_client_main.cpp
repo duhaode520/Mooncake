@@ -31,24 +31,27 @@ struct ClientConfig {
     std::string global_segment_size = "4 GB";
     int32_t threads = 1;
     bool enable_offload = false;
+
+    // Load values from a JSON/YAML config file. Keys not present in the file
+    // retain their struct-default values.
+    void LoadFromConfig(const mooncake::DefaultConfig& cfg) {
+        cfg.GetString("host", &host, host);
+        cfg.GetString("metadata_server", &metadata_server, metadata_server);
+        cfg.GetString("device_names", &device_names, device_names);
+        cfg.GetString("master_server_address", &master_server_address,
+                      master_server_address);
+        cfg.GetString("protocol", &protocol, protocol);
+        cfg.GetInt32("port", &port, port);
+        cfg.GetString("global_segment_size", &global_segment_size,
+                      global_segment_size);
+        cfg.GetInt32("threads", &threads, threads);
+        cfg.GetBool("enable_offload", &enable_offload, enable_offload);
+    }
 };
 
-void InitClientConf(const mooncake::DefaultConfig& cfg, ClientConfig& c) {
-    cfg.GetString("host", &c.host, FLAGS_host);
-    cfg.GetString("metadata_server", &c.metadata_server,
-                  FLAGS_metadata_server);
-    cfg.GetString("device_names", &c.device_names, FLAGS_device_names);
-    cfg.GetString("master_server_address", &c.master_server_address,
-                  FLAGS_master_server_address);
-    cfg.GetString("protocol", &c.protocol, FLAGS_protocol);
-    cfg.GetInt32("port", &c.port, FLAGS_port);
-    cfg.GetString("global_segment_size", &c.global_segment_size,
-                  FLAGS_global_segment_size);
-    cfg.GetInt32("threads", &c.threads, FLAGS_threads);
-    cfg.GetBool("enable_offload", &c.enable_offload, FLAGS_enable_offload);
-}
-
-void LoadConfigFromCmdline(ClientConfig& c, bool conf_set) {
+// Override config values with any CLI flags that were explicitly set.
+// When no config file was provided (!conf_set), all FLAGS values are applied.
+void ApplyCmdlineOverrides(ClientConfig& c, bool conf_set) {
     google::CommandLineFlagInfo info;
     auto overrides = [&](const char* name) -> bool {
         return (google::GetCommandLineFlagInfo(name, &info) &&
@@ -110,19 +113,19 @@ int main(int argc, char* argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     ClientConfig client_config;
-    const std::string conf_path = FLAGS_config_path;
-    if (!conf_path.empty()) {
+    const bool has_config_file = !FLAGS_config_path.empty();
+    if (has_config_file) {
         mooncake::DefaultConfig default_config;
-        default_config.SetPath(conf_path);
+        default_config.SetPath(FLAGS_config_path);
         try {
             default_config.Load();
         } catch (const std::exception& e) {
             LOG(FATAL) << "Failed to load client config: " << e.what();
             return 1;
         }
-        InitClientConf(default_config, client_config);
+        client_config.LoadFromConfig(default_config);
     }
-    LoadConfigFromCmdline(client_config, !conf_path.empty());
+    ApplyCmdlineOverrides(client_config, has_config_file);
 
     size_t global_segment_size =
         string_to_byte_size(client_config.global_segment_size);
