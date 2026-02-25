@@ -34,17 +34,18 @@ struct ClientConfig {
 };
 
 void InitClientConf(const mooncake::DefaultConfig& cfg, ClientConfig& c) {
-    cfg.GetString("host", &c.host, c.host);
-    cfg.GetString("metadata_server", &c.metadata_server, c.metadata_server);
-    cfg.GetString("device_names", &c.device_names, c.device_names);
+    cfg.GetString("host", &c.host, FLAGS_host);
+    cfg.GetString("metadata_server", &c.metadata_server,
+                  FLAGS_metadata_server);
+    cfg.GetString("device_names", &c.device_names, FLAGS_device_names);
     cfg.GetString("master_server_address", &c.master_server_address,
-                  c.master_server_address);
-    cfg.GetString("protocol", &c.protocol, c.protocol);
-    cfg.GetInt32("port", &c.port, c.port);
+                  FLAGS_master_server_address);
+    cfg.GetString("protocol", &c.protocol, FLAGS_protocol);
+    cfg.GetInt32("port", &c.port, FLAGS_port);
     cfg.GetString("global_segment_size", &c.global_segment_size,
-                  c.global_segment_size);
-    cfg.GetInt32("threads", &c.threads, c.threads);
-    cfg.GetBool("enable_offload", &c.enable_offload, c.enable_offload);
+                  FLAGS_global_segment_size);
+    cfg.GetInt32("threads", &c.threads, FLAGS_threads);
+    cfg.GetBool("enable_offload", &c.enable_offload, FLAGS_enable_offload);
 }
 
 void LoadConfigFromCmdline(ClientConfig& c, bool conf_set) {
@@ -146,6 +147,18 @@ int main(int argc, char* argv[]) {
     coro_rpc::coro_rpc_server server(client_config.threads, client_config.port,
                                      "127.0.0.1");
     RegisterClientRpcService(server, *client_inst);
+
+    LOG(INFO) << "Client config: host=" << client_config.host
+              << ", metadata_server=" << client_config.metadata_server
+              << ", device_names=" << client_config.device_names
+              << ", master_server_address="
+              << client_config.master_server_address
+              << ", protocol=" << client_config.protocol
+              << ", port=" << client_config.port
+              << ", global_segment_size="
+              << client_config.global_segment_size
+              << ", threads=" << client_config.threads
+              << ", enable_offload=" << client_config.enable_offload;
 
     LOG(INFO) << "Starting real client service on 127.0.0.1:"
               << client_config.port;
