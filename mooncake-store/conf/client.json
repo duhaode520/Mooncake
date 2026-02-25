@@ -1,0 +1,11 @@
+{
+  "host": "0.0.0.0",
+  "metadata_server": "http://127.0.0.1:8080/metadata",
+  "device_names": "",
+  "master_server_address": "127.0.0.1:50051",
+  "protocol": "tcp",
+  "port": 50052,
+  "global_segment_size": "4 GB",
+  "threads": 1,
+  "enable_offload": false
+}
