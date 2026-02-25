@@ -20,3 +20,16 @@ target_link_libraries(storage_backend_bench PRIVATE
     glog::glog
     pthread
 )
+
+# Add client mode comparison benchmark executable
+# Compares embedded (in-process Client) vs standalone (DummyClient+RealClient)
+add_executable(client_mode_bench client_mode_bench.cpp)
+target_link_libraries(client_mode_bench PRIVATE
+    mooncake_store
+    transfer_engine
+    cachelib_memory_allocator
+    mooncake_common
+    glog::glog
+    gflags::gflags
+    pthread
+)
