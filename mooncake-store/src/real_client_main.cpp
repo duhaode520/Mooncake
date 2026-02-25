@@ -33,19 +33,21 @@ struct ClientConfig {
     bool enable_offload = false;
 
     // Load values from a JSON/YAML config file. Keys not present in the file
-    // retain their struct-default values.
+    // fall back to gflags defaults (single source of truth for default values,
+    // consistent with mooncake_master's InitMasterConf pattern).
     void LoadFromConfig(const mooncake::DefaultConfig& cfg) {
-        cfg.GetString("host", &host, host);
-        cfg.GetString("metadata_server", &metadata_server, metadata_server);
-        cfg.GetString("device_names", &device_names, device_names);
+        cfg.GetString("host", &host, FLAGS_host);
+        cfg.GetString("metadata_server", &metadata_server,
+                      FLAGS_metadata_server);
+        cfg.GetString("device_names", &device_names, FLAGS_device_names);
         cfg.GetString("master_server_address", &master_server_address,
-                      master_server_address);
-        cfg.GetString("protocol", &protocol, protocol);
-        cfg.GetInt32("port", &port, port);
+                      FLAGS_master_server_address);
+        cfg.GetString("protocol", &protocol, FLAGS_protocol);
+        cfg.GetInt32("port", &port, FLAGS_port);
         cfg.GetString("global_segment_size", &global_segment_size,
-                      global_segment_size);
-        cfg.GetInt32("threads", &threads, threads);
-        cfg.GetBool("enable_offload", &enable_offload, enable_offload);
+                      FLAGS_global_segment_size);
+        cfg.GetInt32("threads", &threads, FLAGS_threads);
+        cfg.GetBool("enable_offload", &enable_offload, FLAGS_enable_offload);
     }
 };
 
