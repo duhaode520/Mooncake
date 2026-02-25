@@ -3,6 +3,7 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 
 #include "client_service.h"
+#include "default_config.h"
 #include "real_client.h"
 
 using namespace mooncake;
@@ -18,6 +19,48 @@ DEFINE_int32(port, 50052, "Real Client service port");
 DEFINE_string(global_segment_size, "4 GB", "Size of global segment");
 DEFINE_int32(threads, 1, "Number of threads for client service");
 DEFINE_bool(enable_offload, false, "Enable offload availability");
+DEFINE_string(config_path, "", "Path to client config file (JSON)");
+
+struct ClientConfig {
+    std::string host                  = "0.0.0.0";
+    std::string metadata_server       = "http://127.0.0.1:8080/metadata";
+    std::string device_names          = "";
+    std::string master_server_address = "127.0.0.1:50051";
+    std::string protocol              = "tcp";
+    int32_t     port                  = 50052;
+    std::string global_segment_size   = "4 GB";
+    int32_t     threads               = 1;
+    bool        enable_offload        = false;
+};
+
+void InitClientConf(const mooncake::DefaultConfig& cfg, ClientConfig& c) {
+    cfg.GetString("host",                   &c.host,                   c.host);
+    cfg.GetString("metadata_server",        &c.metadata_server,        c.metadata_server);
+    cfg.GetString("device_names",           &c.device_names,           c.device_names);
+    cfg.GetString("master_server_address",  &c.master_server_address,  c.master_server_address);
+    cfg.GetString("protocol",               &c.protocol,               c.protocol);
+    cfg.GetInt32 ("port",                   &c.port,                   c.port);
+    cfg.GetString("global_segment_size",    &c.global_segment_size,    c.global_segment_size);
+    cfg.GetInt32 ("threads",                &c.threads,                c.threads);
+    cfg.GetBool  ("enable_offload",         &c.enable_offload,         c.enable_offload);
+}
+
+void LoadConfigFromCmdline(ClientConfig& c, bool conf_set) {
+    google::CommandLineFlagInfo info;
+    auto overrides = [&](const char* name) -> bool {
+        return (google::GetCommandLineFlagInfo(name, &info) && !info.is_default)
+               || !conf_set;
+    };
+    if (overrides("host"))                   c.host                  = FLAGS_host;
+    if (overrides("metadata_server"))        c.metadata_server       = FLAGS_metadata_server;
+    if (overrides("device_names"))           c.device_names          = FLAGS_device_names;
+    if (overrides("master_server_address"))  c.master_server_address = FLAGS_master_server_address;
+    if (overrides("protocol"))               c.protocol              = FLAGS_protocol;
+    if (overrides("port"))                   c.port                  = FLAGS_port;
+    if (overrides("global_segment_size"))    c.global_segment_size   = FLAGS_global_segment_size;
+    if (overrides("threads"))                c.threads               = FLAGS_threads;
+    if (overrides("enable_offload"))         c.enable_offload        = FLAGS_enable_offload;
+}
 
 namespace mooncake {
 void RegisterClientRpcService(coro_rpc::coro_rpc_server &server,

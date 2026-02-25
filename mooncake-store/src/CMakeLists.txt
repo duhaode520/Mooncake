@@ -135,7 +135,7 @@ target_link_options(mooncake_master PRIVATE -Os -s)
 # Client server binary
 add_executable(mooncake_client real_client_main.cpp)
 # Client needs transfer_engine for data transfer operations
-target_link_libraries(mooncake_client PRIVATE mooncake_store transfer_engine asio_shared)
+target_link_libraries(mooncake_client PRIVATE mooncake_store transfer_engine asio_shared mooncake_common)
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
