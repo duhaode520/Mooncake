@@ -116,11 +116,12 @@ wait_for_port() {
 # Step 1: Start Master
 # --------------------------------------------------------------------------
 echo "=== Starting mooncake_master ==="
-mooncake_master --enable_http_metadata_server=true &
+mooncake_master --enable_http_metadata_server=true \
+    >"${RESULT_DIR}/master.log" 2>&1 &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
 wait_for_port 50051
-echo "Master started (PID $MASTER_PID)"
+echo "Master started (PID $MASTER_PID, log: ${RESULT_DIR}/master.log)"
 
 # --------------------------------------------------------------------------
 # Step 2: Run Embedded Mode Benchmarks
@@ -179,7 +180,8 @@ PIDS=()
 sleep 2
 
 echo "=== Restarting mooncake_master ==="
-mooncake_master --enable_http_metadata_server=true &
+mooncake_master --enable_http_metadata_server=true \
+    >"${RESULT_DIR}/master_standalone.log" 2>&1 &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
 wait_for_port 50051
@@ -196,11 +198,12 @@ mooncake_client \
     --global_segment_size="${GLOBAL_SEGMENT_MB} MB" \
     --metadata_server="http://${LOCAL_IP}:8080/metadata" \
     --master_server_address="${LOCAL_IP}:50051" \
-    --port=50052 &
+    --port=50052 \
+    >"${RESULT_DIR}/real_client.log" 2>&1 &
 CLIENT_PID=$!
 PIDS+=("$CLIENT_PID")
 wait_for_port 50052
-echo "RealClient started (PID $CLIENT_PID)"
+echo "RealClient started (PID $CLIENT_PID, log: ${RESULT_DIR}/real_client.log)"
 
 # --------------------------------------------------------------------------
 # Step 4: Run Standalone Mode Benchmarks
