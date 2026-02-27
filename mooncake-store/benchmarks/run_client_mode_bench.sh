@@ -18,7 +18,6 @@
 #   --skip-python     Skip Python benchmark
 #   --skip-cpp        Skip C++ benchmark
 #   --global-segment  Global segment size for embedded mode in MB (default: 4096)
-#   --lease-ttl       KV lease TTL in ms (default: 5000)
 
 set -euo pipefail
 
@@ -38,7 +37,6 @@ SKIP_PYTHON=false
 SKIP_CPP=false
 GLOBAL_SEGMENT_MB=4096
 LOCAL_BUFFER_MB=512
-LEASE_TTL=5000
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -70,7 +68,6 @@ while [[ $# -gt 0 ]]; do
         --skip-python)    SKIP_PYTHON=true;    shift;;
         --skip-cpp)       SKIP_CPP=true;       shift;;
         --global-segment) GLOBAL_SEGMENT_MB="$2"; shift 2;;
-        --lease-ttl)      LEASE_TTL="$2";      shift 2;;
         *) echo "Unknown option: $1"; exit 1;;
     esac
 done
@@ -118,8 +115,8 @@ wait_for_port() {
 # --------------------------------------------------------------------------
 # Step 1: Start Master
 # --------------------------------------------------------------------------
-echo "=== Starting mooncake_master (lease_ttl=${LEASE_TTL}) ==="
-mooncake_master --default_kv_lease_ttl="$LEASE_TTL" --enable_http_metadata_server=true &
+echo "=== Starting mooncake_master ==="
+mooncake_master --enable_http_metadata_server=true &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
 wait_for_port 50051
@@ -182,7 +179,7 @@ PIDS=()
 sleep 2
 
 echo "=== Restarting mooncake_master ==="
-mooncake_master --default_kv_lease_ttl="$LEASE_TTL" --enable_http_metadata_server=true &
+mooncake_master --enable_http_metadata_server=true &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
 wait_for_port 50051
