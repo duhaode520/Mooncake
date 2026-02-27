@@ -42,6 +42,17 @@ LEASE_TTL=5000
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Auto-detect local IP address
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [[ -z "$LOCAL_IP" ]]; then
+    LOCAL_IP=$(ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+fi
+if [[ -z "$LOCAL_IP" ]]; then
+    echo "WARNING: Could not auto-detect local IP, falling back to 127.0.0.1"
+    LOCAL_IP="127.0.0.1"
+fi
+echo "Detected local IP: $LOCAL_IP"
+
 # --------------------------------------------------------------------------
 # Parse arguments
 # --------------------------------------------------------------------------
@@ -125,8 +136,9 @@ echo "=========================================="
 COMMON_PY_ARGS=(
     --protocol "$PROTOCOL"
     --device-name "$DEVICE_NAME"
-    --metadata-server "http://127.0.0.1:8080/metadata"
-    --master-server "localhost:50051"
+    --local-hostname "$LOCAL_IP"
+    --metadata-server "http://${LOCAL_IP}:8080/metadata"
+    --master-server "${LOCAL_IP}:50051"
     --global-segment-size "$GLOBAL_SEGMENT_MB"
     --local-buffer-size "$LOCAL_BUFFER_MB"
     --value-sizes "$VALUE_SIZES"
@@ -151,8 +163,9 @@ if [[ "$SKIP_CPP" != true ]] && [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
         --mode=embedded \
         --protocol="$PROTOCOL" \
         --device_name="$DEVICE_NAME" \
-        --metadata_connection_string="http://127.0.0.1:8080/metadata" \
-        --master_address="localhost:50051" \
+        --metadata_connection_string="http://${LOCAL_IP}:8080/metadata" \
+        --master_address="${LOCAL_IP}:50051" \
+        --local_hostname="${LOCAL_IP}:12345" \
         --value_sizes="$VALUE_SIZES" \
         --ops_per_thread="$NUM_OPS" \
         --warmup_ops="$WARMUP_OPS" \
@@ -180,11 +193,12 @@ wait_for_port 50051
 echo ""
 echo "=== Starting mooncake_client (RealClient) ==="
 mooncake_client \
+    --host="$LOCAL_IP" \
     --protocol="$PROTOCOL" \
     --device_names="$DEVICE_NAME" \
     --global_segment_size="${GLOBAL_SEGMENT_MB} MB" \
-    --metadata_server="http://127.0.0.1:8080/metadata" \
-    --master_server_address="127.0.0.1:50051" \
+    --metadata_server="http://${LOCAL_IP}:8080/metadata" \
+    --master_server_address="${LOCAL_IP}:50051" \
     --port=50052 &
 CLIENT_PID=$!
 PIDS+=("$CLIENT_PID")
@@ -203,7 +217,7 @@ if [[ "$SKIP_PYTHON" != true ]]; then
     echo "--- Python benchmark (standalone) ---"
     python3 "$CLIENT_MODE_BENCH_PY" \
         --mode standalone \
-        --real-client-address "127.0.0.1:50052" \
+        --real-client-address "${LOCAL_IP}:50052" \
         "${COMMON_PY_ARGS[@]}" \
         --output-dir "$STANDALONE_DIR" \
         2>&1 | tee "${STANDALONE_DIR}/python_bench.log"
@@ -213,7 +227,7 @@ if [[ "$SKIP_CPP" != true ]] && [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
     echo "--- C++ benchmark (standalone) ---"
     "$CLIENT_MODE_BENCH_BIN" \
         --mode=standalone \
-        --real_client_address="127.0.0.1:50052" \
+        --real_client_address="${LOCAL_IP}:50052" \
         --value_sizes="$VALUE_SIZES" \
         --ops_per_thread="$NUM_OPS" \
         --warmup_ops="$WARMUP_OPS" \
