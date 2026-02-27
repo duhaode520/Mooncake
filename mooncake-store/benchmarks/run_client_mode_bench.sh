@@ -100,16 +100,23 @@ trap cleanup EXIT
 # --------------------------------------------------------------------------
 wait_for_port() {
     local port=$1
-    local timeout=${2:-30}
+    local pid=${2:-""}
+    local timeout=${3:-30}
     local elapsed=0
-    while ! ss -tlnp 2>/dev/null | grep -q ":${port} " && [[ $elapsed -lt $timeout ]]; do
+    while [[ $elapsed -lt $timeout ]]; do
+        # If a PID was given, check the process is still alive
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+            echo "ERROR: Process $pid exited before port $port became ready"
+            return 1
+        fi
+        if ss -tlnp 2>/dev/null | grep -qE ":${port}\b"; then
+            return 0
+        fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
-    if [[ $elapsed -ge $timeout ]]; then
-        echo "ERROR: Timed out waiting for port $port"
-        exit 1
-    fi
+    echo "ERROR: Timed out waiting for port $port (${timeout}s)"
+    return 1
 }
 
 # --------------------------------------------------------------------------
@@ -120,7 +127,7 @@ mooncake_master --enable_http_metadata_server=true \
     >"${RESULT_DIR}/master.log" 2>&1 &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
-wait_for_port 50051
+wait_for_port 50051 "$MASTER_PID"
 echo "Master started (PID $MASTER_PID, log: ${RESULT_DIR}/master.log)"
 
 # --------------------------------------------------------------------------
@@ -184,7 +191,7 @@ mooncake_master --enable_http_metadata_server=true \
     >"${RESULT_DIR}/master_standalone.log" 2>&1 &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
-wait_for_port 50051
+wait_for_port 50051 "$MASTER_PID"
 
 # --------------------------------------------------------------------------
 # Step 3: Start RealClient for Standalone Mode
@@ -202,7 +209,7 @@ mooncake_client \
     >"${RESULT_DIR}/real_client.log" 2>&1 &
 CLIENT_PID=$!
 PIDS+=("$CLIENT_PID")
-wait_for_port 50052
+wait_for_port 50052 "$CLIENT_PID" 60
 echo "RealClient started (PID $CLIENT_PID, log: ${RESULT_DIR}/real_client.log)"
 
 # --------------------------------------------------------------------------
