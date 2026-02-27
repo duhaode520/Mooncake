@@ -119,7 +119,7 @@ wait_for_port() {
 # Step 1: Start Master
 # --------------------------------------------------------------------------
 echo "=== Starting mooncake_master (lease_ttl=${LEASE_TTL}) ==="
-mooncake_master --default_kv_lease_ttl="$LEASE_TTL" &
+mooncake_master --default_kv_lease_ttl="$LEASE_TTL" --enable_http_metadata_server=true &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
 wait_for_port 50051
@@ -182,7 +182,7 @@ PIDS=()
 sleep 2
 
 echo "=== Restarting mooncake_master ==="
-mooncake_master --default_kv_lease_ttl="$LEASE_TTL" &
+mooncake_master --default_kv_lease_ttl="$LEASE_TTL" --enable_http_metadata_server=true &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
 wait_for_port 50051
