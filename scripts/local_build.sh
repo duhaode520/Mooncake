@@ -55,9 +55,18 @@ if [ -f "$ROOT_DIR/.venv/bin/activate" ]; then
 fi
 
 # 检查 Python 版本
-CURRENT_PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "")
+PYTHON_CMD="python"
+if ! command -v python &>/dev/null; then
+    if command -v python3 &>/dev/null; then
+        PYTHON_CMD="python3"
+    else
+        print_error "未找到 python 或 python3，请先安装 Python $PYTHON_VERSION"
+    fi
+fi
+
+CURRENT_PYTHON_VERSION=$($PYTHON_CMD -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "")
 if [ -z "$CURRENT_PYTHON_VERSION" ]; then
-    print_error "未找到 Python，请先安装 Python $PYTHON_VERSION"
+    print_error "无法获取 Python 版本"
 fi
 
 if [ "$CURRENT_PYTHON_VERSION" != "$PYTHON_VERSION" ]; then
@@ -67,7 +76,7 @@ if [ "$CURRENT_PYTHON_VERSION" != "$PYTHON_VERSION" ]; then
     OUTPUT_DIR="dist-py${PYTHON_VERSION//./}"
 fi
 
-print_success "Python 版本: $(python --version)"
+print_success "Python 版本: $($PYTHON_CMD --version)"
 
 # ============================================================
 # 2. 检测 CUDA 环境
