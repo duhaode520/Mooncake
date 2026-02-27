@@ -82,6 +82,16 @@ mkdir -p "$EMBEDDED_DIR" "$STANDALONE_DIR"
 CLIENT_MODE_BENCH_BIN="${BUILD_DIR}/mooncake-store/benchmarks/client_mode_bench"
 CLIENT_MODE_BENCH_PY="${SCRIPT_DIR}/client_mode_bench.py"
 
+# Prefer native ELF binaries over Python wrappers (venv may shadow them)
+MOONCAKE_MASTER="mooncake_master"
+MOONCAKE_CLIENT="mooncake_client"
+if [[ -x /usr/local/bin/mooncake_master ]]; then
+    MOONCAKE_MASTER="/usr/local/bin/mooncake_master"
+fi
+if [[ -x /usr/local/bin/mooncake_client ]]; then
+    MOONCAKE_CLIENT="/usr/local/bin/mooncake_client"
+fi
+
 # PIDs to clean up
 PIDS=()
 
@@ -90,6 +100,9 @@ cleanup() {
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
+    # Also kill by name in case PIDs were lost
+    pkill -f "mooncake_master" 2>/dev/null || true
+    pkill -f "mooncake_client --" 2>/dev/null || true
     wait 2>/dev/null || true
     echo "Cleanup done."
 }
@@ -119,11 +132,34 @@ wait_for_port() {
     return 1
 }
 
+wait_for_port_free() {
+    local port=$1
+    local timeout=${2:-15}
+    local elapsed=0
+    while ss -tlnp 2>/dev/null | grep -qE ":${port}\b" && [[ $elapsed -lt $timeout ]]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    if [[ $elapsed -ge $timeout ]]; then
+        echo "WARNING: Port $port still in use after ${timeout}s"
+    fi
+}
+
+kill_and_wait() {
+    local pid=$1
+    local name=${2:-"process"}
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Stopping $name (PID $pid)..."
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    fi
+}
+
 # --------------------------------------------------------------------------
 # Step 1: Start Master
 # --------------------------------------------------------------------------
 echo "=== Starting mooncake_master ==="
-mooncake_master --enable_http_metadata_server=true \
+"$MOONCAKE_MASTER" --enable_http_metadata_server=true \
     >"${RESULT_DIR}/master.log" 2>&1 &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
@@ -181,13 +217,13 @@ if [[ "$SKIP_CPP" != true ]] && [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
 fi
 
 # Kill master to reset state, then restart for standalone mode
-kill "$MASTER_PID" 2>/dev/null || true
-wait "$MASTER_PID" 2>/dev/null || true
+kill_and_wait "$MASTER_PID" "mooncake_master"
 PIDS=()
-sleep 2
+wait_for_port_free 50051
+wait_for_port_free 8080
 
 echo "=== Restarting mooncake_master ==="
-mooncake_master --enable_http_metadata_server=true \
+"$MOONCAKE_MASTER" --enable_http_metadata_server=true \
     >"${RESULT_DIR}/master_standalone.log" 2>&1 &
 MASTER_PID=$!
 PIDS+=("$MASTER_PID")
@@ -198,7 +234,7 @@ wait_for_port 50051 "$MASTER_PID"
 # --------------------------------------------------------------------------
 echo ""
 echo "=== Starting mooncake_client (RealClient) ==="
-mooncake_client \
+"$MOONCAKE_CLIENT" \
     --host="$LOCAL_IP" \
     --protocol="$PROTOCOL" \
     --device_names="$DEVICE_NAME" \
@@ -224,7 +260,7 @@ if [[ "$SKIP_PYTHON" != true ]]; then
     echo "--- Python benchmark (standalone) ---"
     python3 "$CLIENT_MODE_BENCH_PY" \
         --mode standalone \
-        --real-client-address "${LOCAL_IP}:50052" \
+        --real-client-address "127.0.0.1:50052" \
         "${COMMON_PY_ARGS[@]}" \
         --output-dir "$STANDALONE_DIR" \
         2>&1 | tee "${STANDALONE_DIR}/python_bench.log"
@@ -234,7 +270,7 @@ if [[ "$SKIP_CPP" != true ]] && [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
     echo "--- C++ benchmark (standalone) ---"
     "$CLIENT_MODE_BENCH_BIN" \
         --mode=standalone \
-        --real_client_address="${LOCAL_IP}:50052" \
+        --real_client_address="127.0.0.1:50052" \
         --value_sizes="$VALUE_SIZES" \
         --ops_per_thread="$NUM_OPS" \
         --warmup_ops="$WARMUP_OPS" \
