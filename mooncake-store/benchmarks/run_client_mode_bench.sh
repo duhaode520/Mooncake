@@ -22,6 +22,53 @@
 set -euo pipefail
 
 # --------------------------------------------------------------------------
+# Help
+# --------------------------------------------------------------------------
+usage() {
+    cat <<'EOF'
+Mooncake Store: Embedded vs Standalone Client Mode Benchmark Runner
+
+Usage:
+  ./run_client_mode_bench.sh [options]
+
+Options:
+  --protocol <tcp|rdma>     Transfer protocol (default: tcp)
+  --device-name <name>      RDMA device name, required when protocol=rdma (default: "")
+  --build-dir <path>        C++ build directory (default: ../../build)
+  --value-sizes <list>      Comma-separated value sizes in bytes
+                            (default: 1024,65536,1048576,4194304,16777216)
+  --num-ops <n>             Operations per value-size tier (default: 100)
+  --warmup-ops <n>          Warmup operations before measurement (default: 10)
+  --batch-size <n>          Python benchmark batch size (default: 1)
+  --num-threads <n>         Thread count (default: 1)
+  --output-dir <path>       Base output directory (default: ./bench_results)
+  --global-segment <MB>     Global segment size in MB (default: 4096)
+  --skip-python             Skip Python benchmark
+  --skip-cpp                Skip C++ benchmark
+  -h, --help                Show this help message
+
+Examples:
+  # Quick smoke test
+  ./run_client_mode_bench.sh --value-sizes "1024,65536" --num-ops 10 --warmup-ops 2
+
+  # Python-only, larger batch
+  ./run_client_mode_bench.sh --skip-cpp --batch-size 8 --num-ops 200
+
+  # RDMA mode
+  ./run_client_mode_bench.sh --protocol rdma --device-name mlx5_0
+
+  # Custom build directory
+  ./run_client_mode_bench.sh --build-dir /path/to/build
+
+Note:
+  All binaries (mooncake_master, mooncake_client, client_mode_bench, Python wheel)
+  must be built from the same source tree to avoid RPC version mismatch.
+  The script prefers binaries from --build-dir, then /usr/local/bin, then PATH.
+EOF
+    exit 0
+}
+
+# --------------------------------------------------------------------------
 # Defaults
 # --------------------------------------------------------------------------
 PROTOCOL="tcp"
@@ -56,6 +103,7 @@ echo "Detected local IP: $LOCAL_IP"
 # --------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)        usage;;
         --protocol)       PROTOCOL="$2";       shift 2;;
         --device-name)    DEVICE_NAME="$2";    shift 2;;
         --build-dir)      BUILD_DIR="$2";      shift 2;;
@@ -82,15 +130,24 @@ mkdir -p "$EMBEDDED_DIR" "$STANDALONE_DIR"
 CLIENT_MODE_BENCH_BIN="${BUILD_DIR}/mooncake-store/benchmarks/client_mode_bench"
 CLIENT_MODE_BENCH_PY="${SCRIPT_DIR}/client_mode_bench.py"
 
-# Prefer native ELF binaries over Python wrappers (venv may shadow them)
+# Prefer build directory binaries (version-matched), then /usr/local/bin, then PATH
 MOONCAKE_MASTER="mooncake_master"
 MOONCAKE_CLIENT="mooncake_client"
-if [[ -x /usr/local/bin/mooncake_master ]]; then
+if [[ -x "${BUILD_DIR}/mooncake-store/src/mooncake_master" ]]; then
+    MOONCAKE_MASTER="${BUILD_DIR}/mooncake-store/src/mooncake_master"
+elif [[ -x /usr/local/bin/mooncake_master ]]; then
     MOONCAKE_MASTER="/usr/local/bin/mooncake_master"
 fi
-if [[ -x /usr/local/bin/mooncake_client ]]; then
+if [[ -x "${BUILD_DIR}/mooncake-store/src/mooncake_client" ]]; then
+    MOONCAKE_CLIENT="${BUILD_DIR}/mooncake-store/src/mooncake_client"
+elif [[ -x /usr/local/bin/mooncake_client ]]; then
     MOONCAKE_CLIENT="/usr/local/bin/mooncake_client"
 fi
+echo "Using master:    $MOONCAKE_MASTER"
+echo "Using client:    $MOONCAKE_CLIENT"
+echo "Using benchmark: $CLIENT_MODE_BENCH_BIN"
+echo "NOTE: All binaries (master, client, benchmark, Python wheel) must be built"
+echo "      from the same source tree to avoid RPC version mismatch."
 
 # PIDs to clean up
 PIDS=()
