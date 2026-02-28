@@ -198,22 +198,27 @@ if [[ "$SKIP_PYTHON" != true ]]; then
         2>&1 | tee "${EMBEDDED_DIR}/python_bench.log"
 fi
 
-if [[ "$SKIP_CPP" != true ]] && [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
-    echo "--- C++ benchmark (embedded) ---"
-    "$CLIENT_MODE_BENCH_BIN" \
-        --mode=embedded \
-        --protocol="$PROTOCOL" \
-        --device_name="$DEVICE_NAME" \
-        --metadata_connection_string="http://${LOCAL_IP}:8080/metadata" \
-        --master_address="${LOCAL_IP}:50051" \
-        --local_hostname="${LOCAL_IP}:12345" \
-        --value_sizes="$VALUE_SIZES" \
-        --ops_per_thread="$NUM_OPS" \
-        --warmup_ops="$WARMUP_OPS" \
-        --num_threads="$NUM_THREADS" \
-        --ram_buffer_size_gb=$((GLOBAL_SEGMENT_MB / 1024)) \
-        --output_json="${EMBEDDED_DIR}/cpp_results.json" \
-        2>&1 | tee "${EMBEDDED_DIR}/cpp_bench.log"
+if [[ "$SKIP_CPP" != true ]]; then
+    if [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
+        echo "--- C++ benchmark (embedded) ---"
+        "$CLIENT_MODE_BENCH_BIN" \
+            --mode=embedded \
+            --protocol="$PROTOCOL" \
+            --device_name="$DEVICE_NAME" \
+            --metadata_connection_string="http://${LOCAL_IP}:8080/metadata" \
+            --master_address="${LOCAL_IP}:50051" \
+            --local_hostname="${LOCAL_IP}:12345" \
+            --value_sizes="$VALUE_SIZES" \
+            --ops_per_thread="$NUM_OPS" \
+            --warmup_ops="$WARMUP_OPS" \
+            --num_threads="$NUM_THREADS" \
+            --ram_buffer_size_gb=$((GLOBAL_SEGMENT_MB / 1024)) \
+            --output_json="${EMBEDDED_DIR}/cpp_results.json" \
+            2>&1 | tee "${EMBEDDED_DIR}/cpp_bench.log"
+    else
+        echo "WARNING: C++ benchmark binary not found: $CLIENT_MODE_BENCH_BIN"
+        echo "         Build with: cd build && cmake .. -DBUILD_UNIT_TESTS=ON && make client_mode_bench"
+    fi
 fi
 
 # Kill master to reset state, then restart for standalone mode
@@ -266,17 +271,21 @@ if [[ "$SKIP_PYTHON" != true ]]; then
         2>&1 | tee "${STANDALONE_DIR}/python_bench.log"
 fi
 
-if [[ "$SKIP_CPP" != true ]] && [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
-    echo "--- C++ benchmark (standalone) ---"
-    "$CLIENT_MODE_BENCH_BIN" \
-        --mode=standalone \
-        --real_client_address="127.0.0.1:50052" \
-        --value_sizes="$VALUE_SIZES" \
-        --ops_per_thread="$NUM_OPS" \
-        --warmup_ops="$WARMUP_OPS" \
-        --num_threads="$NUM_THREADS" \
-        --output_json="${STANDALONE_DIR}/cpp_results.json" \
-        2>&1 | tee "${STANDALONE_DIR}/cpp_bench.log"
+if [[ "$SKIP_CPP" != true ]]; then
+    if [[ -f "$CLIENT_MODE_BENCH_BIN" ]]; then
+        echo "--- C++ benchmark (standalone) ---"
+        "$CLIENT_MODE_BENCH_BIN" \
+            --mode=standalone \
+            --real_client_address="127.0.0.1:50052" \
+            --value_sizes="$VALUE_SIZES" \
+            --ops_per_thread="$NUM_OPS" \
+            --warmup_ops="$WARMUP_OPS" \
+            --num_threads="$NUM_THREADS" \
+            --output_json="${STANDALONE_DIR}/cpp_results.json" \
+            2>&1 | tee "${STANDALONE_DIR}/cpp_bench.log"
+    else
+        echo "WARNING: C++ benchmark binary not found, skipping (see above)"
+    fi
 fi
 
 # --------------------------------------------------------------------------
