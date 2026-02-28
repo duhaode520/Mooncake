@@ -290,18 +290,21 @@ static void StandaloneWorker(int tid, size_t value_size,
                              std::atomic<bool>& stop,
                              ThreadStats& stats,
                              bool warmup_only) {
-    // Use pre-allocated buffer from context (alloc'd once in main loop)
-    void* buf = ctx.buf;
-    memset(buf, 'A' + (tid % 26), value_size);
-
     int ops = warmup_only ? FLAGS_warmup_ops : FLAGS_ops_per_thread;
     std::string prefix = warmup_only ? "warmup_" : "";
 
+    // Each op uses its own region within the pre-allocated buffer,
+    // offset = i * value_size, to avoid memory conflicts between ops.
+    char* base = static_cast<char*>(ctx.buf);
+
     // Phase 1: Put
     for (int i = 0; i < ops && !stop.load(); i++) {
+        char* op_buf = base + (size_t)i * value_size;
+        memset(op_buf, 'A' + (tid % 26), value_size);
+
         std::string key = prefix + "skey_" + std::to_string(tid) + "_" +
                           std::to_string(value_size) + "_" + std::to_string(i);
-        std::span<const char> val(static_cast<const char*>(buf), value_size);
+        std::span<const char> val(op_buf, value_size);
         auto t0 = std::chrono::high_resolution_clock::now();
         int ret = ctx.client->put(key, val);
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -535,23 +538,31 @@ int main(int argc, char** argv) {
         StandaloneContext ctx;
         if (!InitStandalone(ctx)) return 1;
 
-        // Allocate buffer once using the largest value size
+        // Allocate a large buffer: max_ops * max_value_size so each op
+        // gets its own memory region and avoids conflicts.
         size_t max_vs = *std::max_element(value_sizes.begin(),
                                           value_sizes.end());
-        uint64_t buf_addr = ctx.client->alloc_from_mem_pool(max_vs);
+        int max_ops = std::max((int)FLAGS_ops_per_thread,
+                               (int)FLAGS_warmup_ops);
+        size_t total_buf_size = (size_t)max_ops * max_vs;
+        uint64_t buf_addr = ctx.client->alloc_from_mem_pool(total_buf_size);
         if (!buf_addr) {
-            LOG(ERROR) << "alloc_from_mem_pool failed for " << max_vs
-                       << " bytes";
+            LOG(ERROR) << "alloc_from_mem_pool failed for "
+                       << total_buf_size << " bytes ("
+                       << max_ops << " ops * " << FormatBytes(max_vs) << ")";
             return 1;
         }
         ctx.buf = reinterpret_cast<void*>(buf_addr);
-        ctx.buf_size = max_vs;
+        ctx.buf_size = total_buf_size;
 
-        int rc = ctx.client->register_buffer(ctx.buf, max_vs);
+        int rc = ctx.client->register_buffer(ctx.buf, total_buf_size);
         if (rc != 0) {
             LOG(ERROR) << "register_buffer failed: " << rc;
             return 1;
         }
+        LOG(INFO) << "Allocated standalone buffer: " << max_ops << " ops * "
+                  << FormatBytes(max_vs) << " = "
+                  << FormatBytes(total_buf_size);
 
         for (size_t vs : value_sizes) {
             LOG(INFO) << "\n--- Benchmarking " << FormatBytes(vs) << " ---";
