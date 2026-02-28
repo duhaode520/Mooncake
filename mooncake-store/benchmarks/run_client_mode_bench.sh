@@ -350,13 +350,66 @@ fi
 # --------------------------------------------------------------------------
 echo ""
 echo "=========================================="
-echo "  Comparison Report (Python)"
+echo "  Comparison Report (Python Benchmark)"
 echo "=========================================="
 
 if [[ "$SKIP_PYTHON" != true ]] && \
    [[ -f "${EMBEDDED_DIR}/results.json" ]] && \
    [[ -f "${STANDALONE_DIR}/results.json" ]]; then
     python3 "$CLIENT_MODE_BENCH_PY" --compare "$EMBEDDED_DIR" "$STANDALONE_DIR"
+fi
+
+echo ""
+echo "=========================================="
+echo "  Comparison Report (C++ Benchmark)"
+echo "=========================================="
+
+CPP_A="${EMBEDDED_DIR}/cpp_results.json"
+CPP_B="${STANDALONE_DIR}/cpp_results.json"
+if [[ -f "$CPP_A" ]] && [[ -f "$CPP_B" ]]; then
+    python3 - "$CPP_A" "$CPP_B" <<'PYEOF'
+import json, sys
+
+def fmt_size(b):
+    for u in ["B","KB","MB","GB"]:
+        if b < 1024: return f"{b:.1f} {u}" if b != int(b) else f"{int(b)} {u}"
+        b /= 1024
+    return f"{b:.1f} TB"
+
+def diff_pct(a, b):
+    if a == 0: return "N/A"
+    return f"{(b - a) / a * 100:+.1f}%"
+
+a_data = json.load(open(sys.argv[1]))
+b_data = json.load(open(sys.argv[2]))
+
+b_map = {r["value_size"]: r for r in b_data}
+
+hdr = f"{'ValueSize':>10}  {'Op':>3}  {'A Mean(us)':>10}  {'B Mean(us)':>10}  {'Diff%':>8}  {'A P99(us)':>9}  {'B P99(us)':>9}  {'Diff%':>8}  {'A MB/s':>8}  {'B MB/s':>8}  {'Diff%':>8}"
+sep = "=" * len(hdr)
+print(sep)
+print(f"  A = {sys.argv[1]}")
+print(f"  B = {sys.argv[2]}")
+print(sep)
+print(hdr)
+print("-" * len(hdr))
+
+for a in a_data:
+    vs = a["value_size"]
+    b = b_map.get(vs)
+    if not b: continue
+    for op in ["put", "get"]:
+        am, bm = a[op]["mean_us"], b[op]["mean_us"]
+        ap, bp = a[op]["p99_us"], b[op]["p99_us"]
+        at, bt = a[op]["mbps"], b[op]["mbps"]
+        print(f"{fmt_size(vs):>10}  {op:>3}  {am:>10.1f}  {bm:>10.1f}  {diff_pct(am, bm):>8}  {ap:>9.0f}  {bp:>9.0f}  {diff_pct(ap, bp):>8}  {at:>8.1f}  {bt:>8.1f}  {diff_pct(at, bt):>8}")
+
+print(sep)
+PYEOF
+elif [[ "$SKIP_CPP" == true ]]; then
+    echo "(skipped)"
+else
+    echo "C++ result files not found, skipping comparison."
 fi
 
 echo ""
