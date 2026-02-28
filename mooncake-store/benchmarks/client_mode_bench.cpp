@@ -386,10 +386,16 @@ static ValueSizeResult AggregateStats(
         r.get_mean = std::accumulate(get_lat.begin(), get_lat.end(), 0.0) /
                      get_lat.size();
 
-    r.put_ops_s = r.put_ops / duration_s;
-    r.get_ops_s = r.get_ops / duration_s;
-    r.put_mbps = (r.put_ops * value_size) / (duration_s * 1024.0 * 1024.0);
-    r.get_mbps = (r.get_ops * value_size) / (duration_s * 1024.0 * 1024.0);
+    // Compute throughput from mean latency (per-phase), not total duration
+    // which includes both put and get phases combined.
+    if (r.put_mean > 0) {
+        r.put_ops_s = 1e6 / r.put_mean;  // ops/s per thread
+        r.put_mbps = (value_size / (1024.0 * 1024.0)) * r.put_ops_s;
+    }
+    if (r.get_mean > 0) {
+        r.get_ops_s = 1e6 / r.get_mean;
+        r.get_mbps = (value_size / (1024.0 * 1024.0)) * r.get_ops_s;
+    }
 
     return r;
 }
