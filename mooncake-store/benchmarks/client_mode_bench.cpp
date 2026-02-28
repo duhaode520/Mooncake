@@ -257,6 +257,8 @@ static void EmbeddedWorker(int tid, size_t value_size,
 
 struct StandaloneContext {
     std::unique_ptr<DummyClient> client;
+    void* buf = nullptr;
+    size_t buf_size = 0;
 };
 
 static bool InitStandalone(StandaloneContext& ctx) {
@@ -288,20 +290,9 @@ static void StandaloneWorker(int tid, size_t value_size,
                              std::atomic<bool>& stop,
                              ThreadStats& stats,
                              bool warmup_only) {
-    // Allocate buffer from shared memory pool
-    uint64_t buf_addr = ctx.client->alloc_from_mem_pool(value_size);
-    if (!buf_addr) {
-        LOG(ERROR) << "Thread " << tid << ": alloc_from_mem_pool failed";
-        return;
-    }
-    void* buf = reinterpret_cast<void*>(buf_addr);
+    // Use pre-allocated buffer from context (alloc'd once in main loop)
+    void* buf = ctx.buf;
     memset(buf, 'A' + (tid % 26), value_size);
-
-    int rc = ctx.client->register_buffer(buf, value_size);
-    if (rc != 0) {
-        LOG(ERROR) << "Thread " << tid << ": register_buffer failed: " << rc;
-        return;
-    }
 
     int ops = warmup_only ? FLAGS_warmup_ops : FLAGS_ops_per_thread;
     std::string prefix = warmup_only ? "warmup_" : "";
@@ -340,8 +331,6 @@ static void StandaloneWorker(int tid, size_t value_size,
             if (ok) { stats.success_ops++; stats.get_ops++; }
         }
     }
-
-    ctx.client->unregister_buffer(buf);
 }
 
 // --------------------------------------------------------------------------
@@ -546,6 +535,24 @@ int main(int argc, char** argv) {
         StandaloneContext ctx;
         if (!InitStandalone(ctx)) return 1;
 
+        // Allocate buffer once using the largest value size
+        size_t max_vs = *std::max_element(value_sizes.begin(),
+                                          value_sizes.end());
+        uint64_t buf_addr = ctx.client->alloc_from_mem_pool(max_vs);
+        if (!buf_addr) {
+            LOG(ERROR) << "alloc_from_mem_pool failed for " << max_vs
+                       << " bytes";
+            return 1;
+        }
+        ctx.buf = reinterpret_cast<void*>(buf_addr);
+        ctx.buf_size = max_vs;
+
+        int rc = ctx.client->register_buffer(ctx.buf, max_vs);
+        if (rc != 0) {
+            LOG(ERROR) << "register_buffer failed: " << rc;
+            return 1;
+        }
+
         for (size_t vs : value_sizes) {
             LOG(INFO) << "\n--- Benchmarking " << FormatBytes(vs) << " ---";
 
@@ -587,6 +594,7 @@ int main(int argc, char** argv) {
             all_results.push_back(result);
         }
 
+        ctx.client->unregister_buffer(ctx.buf);
         CleanupStandalone(ctx);
 
     } else {
