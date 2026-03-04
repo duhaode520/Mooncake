@@ -611,46 +611,38 @@ int RealClient::start_http_server() {
         });
 
     http_server_->set_http_handler<GET>(
-        "/metrics",
-        [this](coro_http_request &req, coro_http_response &resp) {
+        "/metrics", [this](coro_http_request &req, coro_http_response &resp) {
             if (!client_) {
-                resp.set_status_and_content(
-                    status_type::service_unavailable,
-                    "client not initialized");
+                resp.set_status_and_content(status_type::service_unavailable,
+                                            "client not initialized");
                 return;
             }
             auto result = client_->SerializeMetrics();
             if (!result) {
-                resp.set_status_and_content(
-                    status_type::service_unavailable,
-                    "metrics not available");
+                resp.set_status_and_content(status_type::service_unavailable,
+                                            "metrics not available");
                 return;
             }
-            resp.add_header("Content-Type",
-                            "text/plain; version=0.0.4");
-            resp.set_status_and_content(status_type::ok,
-                                        std::move(*result));
+            resp.add_header("Content-Type", "text/plain; version=0.0.4");
+            resp.set_status_and_content(status_type::ok, std::move(*result));
         });
 
     http_server_->set_http_handler<GET>(
         "/metrics/summary",
         [this](coro_http_request &req, coro_http_response &resp) {
             if (!client_) {
-                resp.set_status_and_content(
-                    status_type::service_unavailable,
-                    "client not initialized");
+                resp.set_status_and_content(status_type::service_unavailable,
+                                            "client not initialized");
                 return;
             }
             auto result = client_->GetSummaryMetrics();
             if (!result) {
-                resp.set_status_and_content(
-                    status_type::service_unavailable,
-                    "metrics not available");
+                resp.set_status_and_content(status_type::service_unavailable,
+                                            "metrics not available");
                 return;
             }
             resp.add_header("Content-Type", "text/plain");
-            resp.set_status_and_content(status_type::ok,
-                                        std::move(*result));
+            resp.set_status_and_content(status_type::ok, std::move(*result));
         });
 
     http_server_->async_start();
