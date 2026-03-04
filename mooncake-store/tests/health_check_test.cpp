@@ -53,6 +53,18 @@ class HealthCheckTest : public ::testing::Test {
         return {result.status, std::string(result.resp_body)};
     }
 
+    struct HttpResponse {
+        int http_status;
+        std::string body;
+    };
+
+    HttpResponse fetch_url(int port, const std::string &path) {
+        coro_http::coro_http_client client;
+        std::string url = "http://127.0.0.1:" + std::to_string(port) + path;
+        auto result = client.get(url);
+        return {result.status, std::string(result.resp_body)};
+    }
+
     void SetUp() override { py_client_ = RealClient::create(); }
 
     // Start master and set up the client on the given port.
@@ -150,6 +162,31 @@ TEST_F(HealthCheckTest, HttpReturns503WhenMasterDown) {
     EXPECT_NE(resp.body.find("\"code\":2"), std::string::npos);
 
     py_client_->tearDownAll();
+}
+
+// Test 7: HTTP /metrics and /metrics/summary return 200 when healthy
+TEST_F(HealthCheckTest, MetricsEndpointsReturn200WhenHealthy) {
+    int http_port = getFreeTcpPort();
+    FLAGS_http_port = http_port;
+    ASSERT_EQ(StartMasterAndSetupClient(18920), 0) << "setup_real failed";
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // Verify /metrics returns 200 with valid Prometheus text
+    auto metrics_resp = fetch_url(http_port, "/metrics");
+    EXPECT_EQ(metrics_resp.http_status, 200);
+    // Body is valid Prometheus text (may be empty when no transfers yet)
+    EXPECT_EQ(metrics_resp.body.find("metrics not available"),
+              std::string::npos);
+
+    // Verify /metrics/summary returns 200 with human-readable summary
+    auto summary_resp = fetch_url(http_port, "/metrics/summary");
+    EXPECT_EQ(summary_resp.http_status, 200);
+    EXPECT_NE(summary_resp.body.find("Transfer Metrics Summary"),
+              std::string::npos);
+
+    py_client_->tearDownAll();
+    master_.Stop();
 }
 
 }  // namespace testing
