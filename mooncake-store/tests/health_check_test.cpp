@@ -164,26 +164,64 @@ TEST_F(HealthCheckTest, HttpReturns503WhenMasterDown) {
     py_client_->tearDownAll();
 }
 
-// Test 7: HTTP /metrics and /metrics/summary return 200 when healthy
-TEST_F(HealthCheckTest, MetricsEndpointsReturn200WhenHealthy) {
+// Test 7: HTTP /metrics and /metrics/summary return 200 and reflect
+// transfer stats after put/get operations
+TEST_F(HealthCheckTest, MetricsEndpointsReturnCorrectData) {
     int http_port = getFreeTcpPort();
     FLAGS_http_port = http_port;
     ASSERT_EQ(StartMasterAndSetupClient(18920), 0) << "setup_real failed";
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Verify /metrics returns 200 with valid Prometheus text
+    // Phase 1: Verify endpoints return 200 before any transfers
     auto metrics_resp = fetch_url(http_port, "/metrics");
     EXPECT_EQ(metrics_resp.http_status, 200);
-    // Body is valid Prometheus text (may be empty when no transfers yet)
     EXPECT_EQ(metrics_resp.body.find("metrics not available"),
               std::string::npos);
 
-    // Verify /metrics/summary returns 200 with human-readable summary
     auto summary_resp = fetch_url(http_port, "/metrics/summary");
     EXPECT_EQ(summary_resp.http_status, 200);
     EXPECT_NE(summary_resp.body.find("Transfer Metrics Summary"),
               std::string::npos);
+
+    // Phase 2: Perform put/get and verify metrics reflect the operations
+    const std::string test_data(1024, 'A');  // 1KB of data
+    const std::string key = "metrics_test_key";
+    std::span<const char> data_span(test_data.data(), test_data.size());
+    ReplicateConfig config;
+    config.replica_num = 1;
+    ASSERT_EQ(py_client_->put(key, data_span, config), 0) << "put failed";
+
+    auto buffer_handle = py_client_->get_buffer(key);
+    ASSERT_NE(buffer_handle, nullptr) << "get_buffer failed";
+    EXPECT_EQ(buffer_handle->size(), test_data.size());
+
+    // Verify /metrics now reports transfer metrics
+    auto resp = fetch_url(http_port, "/metrics");
+    LOG(INFO) << "=== /metrics output ===\n" << resp.body;
+    LOG(INFO) << "=== end /metrics ===";
+    EXPECT_EQ(resp.http_status, 200);
+    EXPECT_NE(resp.body.find("mooncake_transfer_write_bytes"),
+              std::string::npos)
+        << "write_bytes metric missing";
+    EXPECT_NE(resp.body.find("mooncake_transfer_read_bytes"), std::string::npos)
+        << "read_bytes metric missing";
+    EXPECT_NE(resp.body.find("mooncake_transfer_put_latency_count"),
+              std::string::npos)
+        << "put_latency histogram missing";
+    EXPECT_NE(resp.body.find("mooncake_transfer_get_latency_count"),
+              std::string::npos)
+        << "get_latency histogram missing";
+
+    // Verify /metrics/summary shows Put/Get data
+    summary_resp = fetch_url(http_port, "/metrics/summary");
+    LOG(INFO) << "=== /metrics/summary output ===\n" << summary_resp.body;
+    LOG(INFO) << "=== end /metrics/summary ===";
+    EXPECT_EQ(summary_resp.http_status, 200);
+    EXPECT_NE(summary_resp.body.find("Put:"), std::string::npos)
+        << "Put summary missing";
+    EXPECT_NE(summary_resp.body.find("Get:"), std::string::npos)
+        << "Get summary missing";
 
     py_client_->tearDownAll();
     master_.Stop();
