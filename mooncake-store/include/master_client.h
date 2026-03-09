@@ -29,6 +29,9 @@ class MasterClient {
         : client_id_(client_id), metrics_(metrics) {
         coro_io::client_pool<coro_rpc::coro_rpc_client>::pool_config
             pool_conf{};
+
+        // set host_alive_detect_duration to 0 to avoid host_alive_detect
+        pool_conf.host_alive_detect_duration = std::chrono::seconds(0);
         const char* value = std::getenv("MC_RPC_PROTOCOL");
         if (value && std::string_view(value) == "rdma") {
             pool_conf.client_config.socket_config =
