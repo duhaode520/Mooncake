@@ -171,17 +171,15 @@ TEST_F(OpLogWatcherTest, HandleWatchEvent_LatestKeyIgnored) {
 }
 
 TEST_F(OpLogWatcherTest, HandleWatchEvent_SequenceTracking) {
-    std::string payload1_json = SerializeOpLogEntry(
-        MakeEntry(1, OpType::PUT_END, "k1", "p1"));
-    std::string payload2_json = SerializeOpLogEntry(
-        MakeEntry(2, OpType::PUT_END, "k2", "p2"));
+    std::string payload1_json =
+        SerializeOpLogEntry(MakeEntry(1, OpType::PUT_END, "k1", "p1"));
+    std::string payload2_json =
+        SerializeOpLogEntry(MakeEntry(2, OpType::PUT_END, "k2", "p2"));
 
-    CallHandleWatchEvent(
-        "/oplog/" + cluster_id_ + "/00000000000000000001", payload1_json, 0,
-        100);
-    CallHandleWatchEvent(
-        "/oplog/" + cluster_id_ + "/00000000000000000002", payload2_json, 0,
-        101);
+    CallHandleWatchEvent("/oplog/" + cluster_id_ + "/00000000000000000001",
+                         payload1_json, 0, 100);
+    CallHandleWatchEvent("/oplog/" + cluster_id_ + "/00000000000000000002",
+                         payload2_json, 0, 101);
 
     EXPECT_EQ(2u, watcher_->GetLastProcessedSequenceId());
 }

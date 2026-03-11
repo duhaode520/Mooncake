@@ -25,11 +25,12 @@ class OpLogSerializerTest : public ::testing::Test {
         e.op_type = type;
         e.object_key = key;
         e.payload = payload;
-        e.checksum = static_cast<uint32_t>(
-            XXH32(payload.data(), payload.size(), 0));
-        e.prefix_hash = key.empty()
-            ? 0
-            : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
+        e.checksum =
+            static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
+        e.prefix_hash =
+            key.empty()
+                ? 0
+                : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
         return e;
     }
 };
