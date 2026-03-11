@@ -36,7 +36,7 @@ struct ChangeNotifierCallbackContext {
 };
 
 // OpLogChangeNotifier implementation backed by etcd Watch.
-// Migrated from OpLogWatcher's watch logic.
+// Migrated from OpLogReplicator's watch logic.
 class EtcdOpLogChangeNotifier : public OpLogChangeNotifier {
    public:
     explicit EtcdOpLogChangeNotifier(const std::string& cluster_id,

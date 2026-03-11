@@ -37,7 +37,7 @@ set(MOONCAKE_STORE_SOURCES
     etcd_oplog_store.cpp
     etcd_oplog_change_notifier.cpp
     oplog_store_factory.cpp
-    oplog_watcher.cpp
+    oplog_replicator.cpp
     oplog_applier.cpp
     hot_standby_service.cpp
     standby_state_machine.cpp

@@ -1,4 +1,4 @@
-#include "oplog_watcher.h"
+#include "oplog_replicator.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -83,22 +83,22 @@ OpLogEntry MakeEntry(uint64_t seq, OpType type, const std::string& key,
     return e;
 }
 
-class OpLogWatcherTest : public ::testing::Test {
+class OpLogReplicatorTest : public ::testing::Test {
    protected:
     void SetUp() override {
-        google::InitGoogleLogging("OpLogWatcherTest");
+        google::InitGoogleLogging("OpLogReplicatorTest");
         FLAGS_logtostderr = 1;
         metadata_store_ = std::make_unique<MinimalMockMetadataStore>();
         applier_ =
             std::make_unique<OpLogApplier>(metadata_store_.get(), "test");
         notifier_ = std::make_unique<MockOpLogChangeNotifier>();
-        watcher_ =
-            std::make_unique<OpLogWatcher>(notifier_.get(), applier_.get());
+        replicator_ =
+            std::make_unique<OpLogReplicator>(notifier_.get(), applier_.get());
     }
 
     void TearDown() override {
-        if (watcher_) {
-            watcher_->Stop();
+        if (replicator_) {
+            replicator_->Stop();
         }
         google::ShutdownGoogleLogging();
     }
@@ -108,55 +108,55 @@ class OpLogWatcherTest : public ::testing::Test {
     std::unique_ptr<MinimalMockMetadataStore> metadata_store_;
     std::unique_ptr<OpLogApplier> applier_;
     std::unique_ptr<MockOpLogChangeNotifier> notifier_;
-    std::unique_ptr<OpLogWatcher> watcher_;
+    std::unique_ptr<OpLogReplicator> replicator_;
 };
 
 // ========== Start/Stop tests ==========
 
-TEST_F(OpLogWatcherTest, TestStartStop) {
-    EXPECT_TRUE(watcher_->StartFromSequenceId(0));
-    EXPECT_TRUE(watcher_->IsWatchHealthy());
-    watcher_->Stop();
-    EXPECT_FALSE(watcher_->IsWatchHealthy());
+TEST_F(OpLogReplicatorTest, TestStartStop) {
+    EXPECT_TRUE(replicator_->StartFromSequenceId(0));
+    EXPECT_TRUE(replicator_->IsHealthy());
+    replicator_->Stop();
+    EXPECT_FALSE(replicator_->IsHealthy());
 }
 
-TEST_F(OpLogWatcherTest, TestStartFromSequenceId) {
-    EXPECT_TRUE(watcher_->StartFromSequenceId(100));
-    EXPECT_TRUE(watcher_->IsWatchHealthy());
+TEST_F(OpLogReplicatorTest, TestStartFromSequenceId) {
+    EXPECT_TRUE(replicator_->StartFromSequenceId(100));
+    EXPECT_TRUE(replicator_->IsHealthy());
 }
 
 // ========== Entry delivery tests ==========
 
-TEST_F(OpLogWatcherTest, InjectEntry_Applied) {
-    watcher_->StartFromSequenceId(0);
+TEST_F(OpLogReplicatorTest, InjectEntry_Applied) {
+    replicator_->StartFromSequenceId(0);
 
     OpLogEntry entry = MakeEntry(1, OpType::PUT_END, "key1", "payload1");
     Notifier().InjectEntry(entry);
 
-    EXPECT_EQ(1u, watcher_->GetLastProcessedSequenceId());
+    EXPECT_EQ(1u, replicator_->GetLastProcessedSequenceId());
     EXPECT_EQ(2u, applier_->GetExpectedSequenceId());
 }
 
-TEST_F(OpLogWatcherTest, InjectMultipleEntries_SequenceTracking) {
-    watcher_->StartFromSequenceId(0);
+TEST_F(OpLogReplicatorTest, InjectMultipleEntries_SequenceTracking) {
+    replicator_->StartFromSequenceId(0);
 
     Notifier().InjectEntry(MakeEntry(1, OpType::PUT_END, "k1", "p1"));
     Notifier().InjectEntry(MakeEntry(2, OpType::PUT_END, "k2", "p2"));
     Notifier().InjectEntry(MakeEntry(3, OpType::REMOVE, "k3", ""));
 
-    EXPECT_EQ(3u, watcher_->GetLastProcessedSequenceId());
+    EXPECT_EQ(3u, replicator_->GetLastProcessedSequenceId());
     EXPECT_EQ(4u, applier_->GetExpectedSequenceId());
 }
 
-TEST_F(OpLogWatcherTest, InjectError_NotifiesCallback) {
+TEST_F(OpLogReplicatorTest, InjectError_NotifiesCallback) {
     bool error_received = false;
-    watcher_->SetStateCallback([&](StandbyEvent event) {
+    replicator_->SetStateCallback([&](StandbyEvent event) {
         if (event == StandbyEvent::WATCH_BROKEN) {
             error_received = true;
         }
     });
 
-    watcher_->StartFromSequenceId(0);
+    replicator_->StartFromSequenceId(0);
     Notifier().InjectError(ErrorCode::ETCD_OPERATION_ERROR);
 
     EXPECT_TRUE(error_received);
@@ -164,12 +164,12 @@ TEST_F(OpLogWatcherTest, InjectError_NotifiesCallback) {
 
 // ========== Utility tests ==========
 
-TEST_F(OpLogWatcherTest, GetLastProcessedSequenceId_InitiallyZero) {
-    EXPECT_EQ(0u, watcher_->GetLastProcessedSequenceId());
+TEST_F(OpLogReplicatorTest, GetLastProcessedSequenceId_InitiallyZero) {
+    EXPECT_EQ(0u, replicator_->GetLastProcessedSequenceId());
 }
 
-TEST_F(OpLogWatcherTest, IsWatchHealthy_FalseBeforeStart) {
-    EXPECT_FALSE(watcher_->IsWatchHealthy());
+TEST_F(OpLogReplicatorTest, IsHealthy_FalseBeforeStart) {
+    EXPECT_FALSE(replicator_->IsHealthy());
 }
 
 }  // namespace mooncake::test

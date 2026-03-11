@@ -111,7 +111,7 @@ class OpLogManager {
 
     // Verify checksum of an OpLogEntry payload.
     // Returns true if checksum matches, false otherwise.
-    // This is public so OpLogWatcher and OpLogApplier can validate entries.
+    // This is public so OpLogReplicator and OpLogApplier can validate entries.
     static bool VerifyChecksum(const OpLogEntry& entry);
 
     // Basic DoS protection for externally sourced OpLog entries (etcd watch /

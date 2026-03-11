@@ -1,4 +1,4 @@
-#include "oplog_watcher.h"
+#include "oplog_replicator.h"
 
 #include <glog/logging.h>
 
@@ -6,7 +6,8 @@
 
 namespace mooncake {
 
-OpLogWatcher::OpLogWatcher(OpLogChangeNotifier* notifier, OpLogApplier* applier)
+OpLogReplicator::OpLogReplicator(OpLogChangeNotifier* notifier,
+                                 OpLogApplier* applier)
     : notifier_(notifier), applier_(applier) {
     if (notifier_ == nullptr) {
         LOG(FATAL) << "OpLogChangeNotifier cannot be null";
@@ -16,16 +17,16 @@ OpLogWatcher::OpLogWatcher(OpLogChangeNotifier* notifier, OpLogApplier* applier)
     }
 }
 
-OpLogWatcher::~OpLogWatcher() { Stop(); }
+OpLogReplicator::~OpLogReplicator() { Stop(); }
 
-void OpLogWatcher::Start() {
+void OpLogReplicator::Start() {
     // Backward-compatible: start from the last processed sequence id.
     (void)StartFromSequenceId(last_processed_sequence_id_.load());
 }
 
-bool OpLogWatcher::StartFromSequenceId(uint64_t start_seq_id) {
+bool OpLogReplicator::StartFromSequenceId(uint64_t start_seq_id) {
     if (running_.load()) {
-        LOG(WARNING) << "OpLogWatcher is already running";
+        LOG(WARNING) << "OpLogReplicator is already running";
         return true;
     }
 
@@ -40,7 +41,8 @@ bool OpLogWatcher::StartFromSequenceId(uint64_t start_seq_id) {
     };
 
     auto on_error = [this](ErrorCode err) {
-        LOG(ERROR) << "OpLogWatcher: notifier error=" << static_cast<int>(err);
+        LOG(ERROR) << "OpLogReplicator: notifier error="
+                   << static_cast<int>(err);
         NotifyStateEvent(StandbyEvent::WATCH_BROKEN);
     };
 
@@ -53,25 +55,25 @@ bool OpLogWatcher::StartFromSequenceId(uint64_t start_seq_id) {
 
     running_.store(true);
     NotifyStateEvent(StandbyEvent::WATCH_HEALTHY);
-    LOG(INFO) << "OpLogWatcher started from sequence_id=" << start_seq_id;
+    LOG(INFO) << "OpLogReplicator started from sequence_id=" << start_seq_id;
     return true;
 }
 
-void OpLogWatcher::Stop() {
+void OpLogReplicator::Stop() {
     if (!running_.load()) {
         return;
     }
 
     running_.store(false);
     notifier_->Stop();
-    LOG(INFO) << "OpLogWatcher stopped";
+    LOG(INFO) << "OpLogReplicator stopped";
 }
 
-uint64_t OpLogWatcher::GetLastProcessedSequenceId() const {
+uint64_t OpLogReplicator::GetLastProcessedSequenceId() const {
     return last_processed_sequence_id_.load();
 }
 
-bool OpLogWatcher::IsWatchHealthy() const {
+bool OpLogReplicator::IsHealthy() const {
     return running_.load() && notifier_->IsHealthy();
 }
 
