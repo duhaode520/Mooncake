@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "oplog_manager.h"
+#include "oplog_store.h"
 #include "types.h"
 
 namespace mooncake {
@@ -25,7 +26,7 @@ namespace mooncake {
  * The latest sequence_id is also stored at:
  *   /oplog/{cluster_id}/latest
  */
-class EtcdOpLogStore {
+class EtcdOpLogStore : public OpLogStore {
    public:
     /**
      * @brief Constructor.
@@ -51,7 +52,7 @@ class EtcdOpLogStore {
      *        background threads if enabled.
      * @return: Error code.
      */
-    ErrorCode Init();
+    ErrorCode Init() override;
 
     /**
      * @brief Write an OpLog entry to etcd.
@@ -60,7 +61,7 @@ class EtcdOpLogStore {
      *              If false, buffer it and return immediately (Group Commit).
      * @return: Error code.
      */
-    ErrorCode WriteOpLog(const OpLogEntry& entry, bool sync = true);
+    ErrorCode WriteOpLog(const OpLogEntry& entry, bool sync = true) override;
 
     /**
      * @brief Read an OpLog entry from etcd by sequence_id.
@@ -68,7 +69,7 @@ class EtcdOpLogStore {
      * @param entry: Output param, the OpLog entry.
      * @return: Error code.
      */
-    ErrorCode ReadOpLog(uint64_t sequence_id, OpLogEntry& entry);
+    ErrorCode ReadOpLog(uint64_t sequence_id, OpLogEntry& entry) override;
 
     /**
      * @brief Read OpLog entries starting from a given sequence_id.
@@ -78,7 +79,7 @@ class EtcdOpLogStore {
      * @return: Error code.
      */
     ErrorCode ReadOpLogSince(uint64_t start_sequence_id, size_t limit,
-                             std::vector<OpLogEntry>& entries);
+                             std::vector<OpLogEntry>& entries) override;
 
     // Like ReadOpLogSince, but also returns the etcd revision for consistent
     // "read then watch(from revision+1)" startup.
@@ -92,20 +93,20 @@ class EtcdOpLogStore {
      * @param sequence_id: Output param, the latest sequence_id.
      * @return: Error code. ETCD_KEY_NOT_EXIST if no OpLog exists yet.
      */
-    ErrorCode GetLatestSequenceId(uint64_t& sequence_id);
+    ErrorCode GetLatestSequenceId(uint64_t& sequence_id) override;
 
     // Stronger (than `/latest`) best-effort query: return the maximum existing
     // sequence_id by scanning etcd keys under /oplog/{cluster_id}/ with
     // descending key order.
     // Return ETCD_KEY_NOT_EXIST if no OpLog exists yet.
-    ErrorCode GetMaxSequenceId(uint64_t& sequence_id);
+    ErrorCode GetMaxSequenceId(uint64_t& sequence_id) override;
 
     /**
      * @brief Update the latest sequence_id in etcd.
      * @param sequence_id: The latest sequence_id to update.
      * @return: Error code.
      */
-    ErrorCode UpdateLatestSequenceId(uint64_t sequence_id);
+    ErrorCode UpdateLatestSequenceId(uint64_t sequence_id) override;
 
     /**
      * @brief Record the sequence_id corresponding to a snapshot.
@@ -114,7 +115,7 @@ class EtcdOpLogStore {
      * @return: Error code.
      */
     ErrorCode RecordSnapshotSequenceId(const std::string& snapshot_id,
-                                       uint64_t sequence_id);
+                                       uint64_t sequence_id) override;
 
     /**
      * @brief Get the sequence_id for a given snapshot.
@@ -123,7 +124,7 @@ class EtcdOpLogStore {
      * @return: Error code. ETCD_KEY_NOT_EXIST if snapshot not found.
      */
     ErrorCode GetSnapshotSequenceId(const std::string& snapshot_id,
-                                    uint64_t& sequence_id);
+                                    uint64_t& sequence_id) override;
 
     /**
      * @brief Clean up OpLog entries before a given sequence_id.
@@ -131,7 +132,7 @@ class EtcdOpLogStore {
      * before_sequence_id will be deleted.
      * @return: Error code.
      */
-    ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id);
+    ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id) override;
 
    private:
     /**
