@@ -205,7 +205,3 @@ _codeql_detected_source_root
 
 # CodeBuddy Memory
 .codebuddy/
-
-docs/*.md
-docs/plans
-docs/*.drawio
