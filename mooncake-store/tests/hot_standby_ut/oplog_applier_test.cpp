@@ -275,9 +275,9 @@ class OpLogApplierGapTest : public ::testing::Test {
         FLAGS_logtostderr = 1;
         mock_metadata_store_ = std::make_unique<MockMetadataStore>();
         mock_oplog_store_ = std::make_unique<MockOpLogStore>();
-        applier_ = std::make_unique<OpLogApplier>(
-            mock_metadata_store_.get(), "test_cluster",
-            mock_oplog_store_.get());
+        applier_ = std::make_unique<OpLogApplier>(mock_metadata_store_.get(),
+                                                  "test_cluster",
+                                                  mock_oplog_store_.get());
     }
     void TearDown() override { google::ShutdownGoogleLogging(); }
 

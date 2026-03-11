@@ -29,7 +29,8 @@ struct ChangeNotifierCallbackContext {
     EtcdOpLogChangeNotifier* notifier{nullptr};
 
     ChangeNotifierCallbackContext() = default;
-    ChangeNotifierCallbackContext(const ChangeNotifierCallbackContext&) = delete;
+    ChangeNotifierCallbackContext(const ChangeNotifierCallbackContext&) =
+        delete;
     ChangeNotifierCallbackContext& operator=(
         const ChangeNotifierCallbackContext&) = delete;
 };
@@ -49,8 +50,7 @@ class EtcdOpLogChangeNotifier : public OpLogChangeNotifier {
 
    private:
     // Read historical entries and return the etcd revision for watch resume.
-    bool ReadOpLogSince(uint64_t start_seq_id,
-                        std::vector<OpLogEntry>& entries,
+    bool ReadOpLogSince(uint64_t start_seq_id, std::vector<OpLogEntry>& entries,
                         EtcdRevisionId& revision_id);
 
     // C-style callback for etcd Watch goroutine.

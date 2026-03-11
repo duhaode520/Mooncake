@@ -40,8 +40,7 @@ class MinimalMockMetadataStore : public MetadataStore {
 // In-memory MockOpLogChangeNotifier for tests
 class MockOpLogChangeNotifier : public OpLogChangeNotifier {
    public:
-    ErrorCode Start(uint64_t /*start_seq*/,
-                    EntryCallback on_entry,
+    ErrorCode Start(uint64_t /*start_seq*/, EntryCallback on_entry,
                     ErrorCallback on_error) override {
         on_entry_ = std::move(on_entry);
         on_error_ = std::move(on_error);
@@ -93,8 +92,8 @@ class OpLogWatcherTest : public ::testing::Test {
         applier_ =
             std::make_unique<OpLogApplier>(metadata_store_.get(), "test");
         notifier_ = std::make_unique<MockOpLogChangeNotifier>();
-        watcher_ = std::make_unique<OpLogWatcher>(notifier_.get(),
-                                                  applier_.get());
+        watcher_ =
+            std::make_unique<OpLogWatcher>(notifier_.get(), applier_.get());
     }
 
     void TearDown() override {

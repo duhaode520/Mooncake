@@ -37,7 +37,6 @@ OpLogApplier::OpLogApplier(MetadataStore* metadata_store,
     }
 }
 
-
 bool OpLogApplier::ApplyOpLogEntry(const OpLogEntry& entry) {
     // Basic DoS protection: validate key/payload sizes before parsing/applying.
     std::string size_reason;

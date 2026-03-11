@@ -14,8 +14,8 @@ std::unique_ptr<OpLogStore> OpLogStoreFactory::Create(
 #ifdef STORE_USE_ETCD
     bool batch_update = (role == OpLogStoreRole::WRITER);
     bool batch_write = (role == OpLogStoreRole::WRITER);
-    auto store = std::make_unique<EtcdOpLogStore>(cluster_id, batch_update,
-                                                  batch_write);
+    auto store =
+        std::make_unique<EtcdOpLogStore>(cluster_id, batch_update, batch_write);
     if (store->Init() != ErrorCode::OK) {
         LOG(ERROR) << "OpLogStoreFactory: failed to init EtcdOpLogStore"
                    << ", cluster_id=" << cluster_id;

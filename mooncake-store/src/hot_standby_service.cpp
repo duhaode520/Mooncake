@@ -581,8 +581,7 @@ void HotStandbyService::ReplicationLoop() {
         repl_oplog_store =
             OpLogStoreFactory::Create(cluster_id_, OpLogStoreRole::READER);
         if (!repl_oplog_store) {
-            LOG(ERROR)
-                << "Failed to create OpLogStore in replication loop";
+            LOG(ERROR) << "Failed to create OpLogStore in replication loop";
         }
     }
 
