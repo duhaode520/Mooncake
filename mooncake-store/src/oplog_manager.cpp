@@ -11,8 +11,7 @@ namespace mooncake {
 
 OpLogManager::OpLogManager() = default;
 
-void OpLogManager::SetOpLogStore(
-    std::shared_ptr<OpLogStore> oplog_store) {
+void OpLogManager::SetOpLogStore(std::shared_ptr<OpLogStore> oplog_store) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     oplog_store_ = oplog_store;
 }
@@ -54,8 +53,8 @@ uint64_t OpLogManager::Append(OpType type, const std::string& key,
         }
         ErrorCode err = oplog_store_->WriteOpLog(entry, sync);
         if (err != ErrorCode::OK) {
-            LOG(WARNING) << "Failed to write OpLog to store, sequence_id=" << seq
-                         << ", but entry is in memory buffer";
+            LOG(WARNING) << "Failed to write OpLog to store, sequence_id="
+                         << seq << ", but entry is in memory buffer";
         }
     }
 

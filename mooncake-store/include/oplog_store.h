@@ -18,8 +18,7 @@ class OpLogStore {
     virtual ErrorCode Init() = 0;
 
     // Write
-    virtual ErrorCode WriteOpLog(const OpLogEntry& entry,
-                                 bool sync = true) = 0;
+    virtual ErrorCode WriteOpLog(const OpLogEntry& entry, bool sync = true) = 0;
 
     // Read
     virtual ErrorCode ReadOpLog(uint64_t sequence_id, OpLogEntry& entry) = 0;
@@ -32,8 +31,8 @@ class OpLogStore {
     virtual ErrorCode UpdateLatestSequenceId(uint64_t sequence_id) = 0;
 
     // Snapshot
-    virtual ErrorCode RecordSnapshotSequenceId(
-        const std::string& snapshot_id, uint64_t sequence_id) = 0;
+    virtual ErrorCode RecordSnapshotSequenceId(const std::string& snapshot_id,
+                                               uint64_t sequence_id) = 0;
     virtual ErrorCode GetSnapshotSequenceId(const std::string& snapshot_id,
                                             uint64_t& sequence_id) = 0;
 

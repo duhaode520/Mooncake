@@ -78,7 +78,8 @@ class OpLogManager {
     // Does NOT modify sequence counters.
     ErrorCode PersistEntry(const OpLogEntry& entry) const;
 
-    // Append a new entry and durably persist it to etcd (if EtcdOpLogStore is set).
+    // Append a new entry and durably persist it to the store (if OpLogStore is
+    // set).
     //
     // This is intended for operations that may free/reuse memory (e.g. REMOVE),
     // where best-effort replication is unsafe: Standby must observe the DELETE

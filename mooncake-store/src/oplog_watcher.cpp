@@ -6,8 +6,7 @@
 
 namespace mooncake {
 
-OpLogWatcher::OpLogWatcher(OpLogChangeNotifier* notifier,
-                           OpLogApplier* applier)
+OpLogWatcher::OpLogWatcher(OpLogChangeNotifier* notifier, OpLogApplier* applier)
     : notifier_(notifier), applier_(applier) {
     if (notifier_ == nullptr) {
         LOG(FATAL) << "OpLogChangeNotifier cannot be null";
@@ -40,8 +39,7 @@ bool OpLogWatcher::StartFromSequenceId(uint64_t start_seq_id) {
     };
 
     auto on_error = [this](ErrorCode err) {
-        LOG(ERROR) << "OpLogWatcher: notifier error="
-                   << static_cast<int>(err);
+        LOG(ERROR) << "OpLogWatcher: notifier error=" << static_cast<int>(err);
         NotifyStateEvent(StandbyEvent::WATCH_BROKEN);
     };
 
