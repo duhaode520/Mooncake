@@ -12,10 +12,12 @@
 
 #include <xxhash.h>
 
-#include "etcd_oplog_store.h"
 #include "metadata_store.h"
+#include "mock_oplog_store.h"
 #include "oplog_manager.h"
 #include "types.h"
+
+using mooncake::test::MockOpLogStore;
 
 namespace mooncake::test {
 
@@ -266,44 +268,89 @@ TEST_F(OpLogApplierTest, TestApplyDuplicateSequenceId) {
 
 // ========== 4.1.3 Gap resolution tests ==========
 
-TEST_F(OpLogApplierTest, TestRequestMissingOpLog_Success) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real EtcdOpLogStore, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
+class OpLogApplierGapTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        google::InitGoogleLogging("OpLogApplierGapTest");
+        FLAGS_logtostderr = 1;
+        mock_metadata_store_ = std::make_unique<MockMetadataStore>();
+        mock_oplog_store_ = std::make_unique<MockOpLogStore>();
+        applier_ = std::make_unique<OpLogApplier>(mock_metadata_store_.get(),
+                                                  "test_cluster",
+                                                  mock_oplog_store_.get());
+    }
+    void TearDown() override { google::ShutdownGoogleLogging(); }
+
+    std::unique_ptr<MockMetadataStore> mock_metadata_store_;
+    std::unique_ptr<MockOpLogStore> mock_oplog_store_;
+    std::unique_ptr<OpLogApplier> applier_;
+};
+
+TEST_F(OpLogApplierGapTest, RequestMissingOpLog_Success) {
+    std::string payload = MakeValidJsonPayload();
+    // Pre-populate seq=2 in mock store
+    OpLogEntry missing = MakeEntry(2, OpType::PUT_END, "key2", payload);
+    mock_oplog_store_->WriteOpLog(missing);
+
+    // Apply seq=1
+    EXPECT_TRUE(applier_->ApplyOpLogEntry(
+        MakeEntry(1, OpType::PUT_END, "key1", payload)));
+    // Apply seq=3 (gap at seq=2)
+    EXPECT_FALSE(applier_->ApplyOpLogEntry(
+        MakeEntry(3, OpType::PUT_END, "key3", payload)));
+
+    // First call registers the gap in missing_sequence_ids_
+    applier_->ProcessPendingEntries();
+    EXPECT_EQ(2u, applier_->GetExpectedSequenceId());
+
+    // Wait for gap resolution trigger (kMissingEntryRequestSeconds = 1s)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    applier_->ProcessPendingEntries();
+
+    // After gap resolution, all 3 should be applied
+    EXPECT_EQ(4u, applier_->GetExpectedSequenceId());
+    EXPECT_TRUE(mock_metadata_store_->Exists("key1"));
+    EXPECT_TRUE(mock_metadata_store_->Exists("key2"));
+    EXPECT_TRUE(mock_metadata_store_->Exists("key3"));
 }
 
-TEST_F(OpLogApplierTest, TestRequestMissingOpLog_Failure) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real EtcdOpLogStore, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
+TEST_F(OpLogApplierGapTest, RequestMissingOpLog_StoreError) {
+    std::string payload = MakeValidJsonPayload();
+    mock_oplog_store_->SetReadError(ErrorCode::ETCD_OPERATION_ERROR);
+
+    EXPECT_TRUE(applier_->ApplyOpLogEntry(
+        MakeEntry(1, OpType::PUT_END, "key1", payload)));
+    EXPECT_FALSE(applier_->ApplyOpLogEntry(
+        MakeEntry(3, OpType::PUT_END, "key3", payload)));
+
+    // First call registers the gap
+    applier_->ProcessPendingEntries();
+
+    // Gap resolution should fail gracefully
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    applier_->ProcessPendingEntries();
+
+    // seq=2 not resolved, expected still at 2
+    EXPECT_EQ(2u, applier_->GetExpectedSequenceId());
 }
 
-TEST_F(OpLogApplierTest, TestRequestMissingOpLog_Timeout) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real EtcdOpLogStore, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
-}
+TEST_F(OpLogApplierGapTest, RequestMissingOpLog_NotFound) {
+    std::string payload = MakeValidJsonPayload();
+    // Don't preload seq=2 in mock store
 
-TEST_F(OpLogApplierTest, TestTryResolveGapsOnceForPromotion) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real EtcdOpLogStore, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
-}
+    EXPECT_TRUE(applier_->ApplyOpLogEntry(
+        MakeEntry(1, OpType::PUT_END, "key1", payload)));
+    EXPECT_FALSE(applier_->ApplyOpLogEntry(
+        MakeEntry(3, OpType::PUT_END, "key3", payload)));
 
-TEST_F(OpLogApplierTest, TestGapResolution_Retry) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real EtcdOpLogStore, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
+    // First call registers the gap
+    applier_->ProcessPendingEntries();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    applier_->ProcessPendingEntries();
+
+    // Not found, should not advance
+    EXPECT_EQ(2u, applier_->GetExpectedSequenceId());
 }
 
 // ========== 4.1.4 Checksum tests ==========

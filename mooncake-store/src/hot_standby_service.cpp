@@ -6,12 +6,12 @@
 #include <thread>
 
 #include "etcd_helper.h"
-#include "etcd_oplog_store.h"
 #include "ha_metric_manager.h"
 #include "master_service.h"
 #include "oplog_applier.h"
 #include "oplog_manager.h"
-#include "oplog_watcher.h"
+#include "oplog_store_factory.h"
+#include "oplog_replicator.h"
 
 namespace mooncake {
 
@@ -185,13 +185,21 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
         oplog_applier_->Recover(local_last_seq_id);
     }
 
-    // Create OpLogWatcher with state machine callback
-    oplog_watcher_ = std::make_unique<OpLogWatcher>(etcd_endpoints, cluster_id,
-                                                    oplog_applier_.get());
-
-    // Register callback for watcher events
-    oplog_watcher_->SetStateCallback(
-        [this](StandbyEvent event) { OnWatcherEvent(event); });
+    // Create OpLogStore, OpLogChangeNotifier, and OpLogReplicator via factory
+    watcher_oplog_store_ = OpLogStoreFactory::Create(
+        OpLogStoreType::ETCD, cluster_id, OpLogStoreRole::READER);
+    if (watcher_oplog_store_) {
+        oplog_change_notifier_ =
+            watcher_oplog_store_->CreateChangeNotifier(cluster_id);
+    }
+    if (oplog_change_notifier_) {
+        oplog_replicator_ = std::make_unique<OpLogReplicator>(
+            oplog_change_notifier_.get(), oplog_applier_.get());
+        oplog_replicator_->SetStateCallback(
+            [this](StandbyEvent event) { OnWatcherEvent(event); });
+    } else {
+        LOG(ERROR) << "Failed to create OpLogChangeNotifier for replicator";
+    }
 
     // Bootstrap:
     // - If we already have local state (warm start), do NOT reload snapshot.
@@ -224,18 +232,23 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     // Read historical OpLog entries since baseline_seq_id.
     uint64_t last_applied_seq_id = baseline_seq_id;
 
-    // Start OpLogWatcher with a consistent "read then watch(from revision+1)"
+    // Start OpLogReplicator with a consistent "read then watch(from revision+1)"
     // sequence.  Retry with exponential backoff to avoid getting stuck in
     // RECONNECTING state where nothing drives recovery.
     static constexpr int kMaxStartRetries = 3;
     static constexpr int kStartRetryBaseMs = 500;
-    bool watcher_started = false;
+    bool replicator_started = false;
+    if (!oplog_replicator_) {
+        LOG(ERROR) << "OpLogReplicator is not available, cannot start";
+        state_machine_.ProcessEvent(StandbyEvent::FATAL_ERROR);
+        return ErrorCode::INTERNAL_ERROR;
+    }
     for (int attempt = 0; attempt < kMaxStartRetries; ++attempt) {
-        if (oplog_watcher_->StartFromSequenceId(last_applied_seq_id)) {
-            watcher_started = true;
+        if (oplog_replicator_->StartFromSequenceId(last_applied_seq_id)) {
+            replicator_started = true;
             break;
         }
-        LOG(WARNING) << "Failed to start OpLogWatcher from sequence_id="
+        LOG(WARNING) << "Failed to start OpLogReplicator from sequence_id="
                      << last_applied_seq_id << " (attempt " << (attempt + 1)
                      << "/" << kMaxStartRetries << ")";
         if (attempt + 1 < kMaxStartRetries) {
@@ -244,8 +257,9 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
         }
     }
 
-    if (!watcher_started) {
-        LOG(ERROR) << "Failed to start OpLogWatcher after " << kMaxStartRetries
+    if (!replicator_started) {
+        LOG(ERROR) << "Failed to start OpLogReplicator after "
+                   << kMaxStartRetries
                    << " attempts, aborting Start()";
         state_machine_.ProcessEvent(StandbyEvent::FATAL_ERROR);
         return ErrorCode::INTERNAL_ERROR;
@@ -293,10 +307,10 @@ void HotStandbyService::Stop() {
     // Trigger STOP event
     state_machine_.ProcessEvent(StandbyEvent::STOP);
 
-    // Stop OpLogWatcher
-    if (oplog_watcher_) {
-        oplog_watcher_->Stop();
-        oplog_watcher_.reset();
+    // Stop OpLogReplicator
+    if (oplog_replicator_) {
+        oplog_replicator_->Stop();
+        oplog_replicator_.reset();
     }
 
     // Wait for threads to finish
@@ -398,9 +412,9 @@ ErrorCode HotStandbyService::Promote() {
     // IMPORTANT:
     // - Do NOT rely on `lag_entries` here because primary_seq_id_ is
     // best-effort.
-    // - Stop OpLogWatcher first to avoid concurrent Apply from watch callbacks.
-    if (oplog_watcher_) {
-        oplog_watcher_->Stop();
+    // - Stop OpLogReplicator first to avoid concurrent Apply from watch callbacks.
+    if (oplog_replicator_) {
+        oplog_replicator_->Stop();
     }
 
     // Best-effort: resolve any outstanding gaps with retry before promotion.
@@ -431,10 +445,10 @@ ErrorCode HotStandbyService::Promote() {
     }
 
     LOG(INFO) << "Final catch-up sync from etcd before promotion...";
-    EtcdOpLogStore oplog_store(cluster_id_,
-                               /*enable_latest_seq_batch_update=*/false);
-    if (oplog_store.Init() != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to initialize oplog_store for final catch-up";
+    auto catch_up_store = OpLogStoreFactory::Create(
+        OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::READER);
+    if (!catch_up_store) {
+        LOG(ERROR) << "Failed to create OpLogStore for final catch-up";
         return ErrorCode::ETCD_OPERATION_ERROR;
     }
     const size_t batch_size = 1000;
@@ -478,7 +492,7 @@ ErrorCode HotStandbyService::Promote() {
 
         std::vector<OpLogEntry> batch;
         ErrorCode read_err =
-            oplog_store.ReadOpLogSince(read_from_seq, batch_size, batch);
+            catch_up_store->ReadOpLogSince(read_from_seq, batch_size, batch);
         if (read_err != ErrorCode::OK) {
             LOG(WARNING) << "Final catch-up: failed to read OpLog since seq="
                          << read_from_seq
@@ -501,7 +515,7 @@ ErrorCode HotStandbyService::Promote() {
     // Transition to PROMOTED state
     state_machine_.ProcessEvent(StandbyEvent::PROMOTION_SUCCESS);
 
-    // Stop replication (OpLogWatcher will stop watching).
+    // Stop replication (OpLogReplicator will stop).
     // Note: This will trigger STOP event, transitioning to STOPPED.
     lock.unlock();
     Stop();
@@ -561,25 +575,21 @@ void HotStandbyService::SetSnapshotProvider(
 void HotStandbyService::ReplicationLoop() {
     LOG(INFO) << "Replication loop started (etcd-based OpLog sync)";
 
-    // With etcd-based OpLog sync, OpLogWatcher handles the actual watching
+    // With etcd-based OpLog sync, OpLogReplicator handles the actual watching
     // in its own thread. This loop now just monitors the status and updates
     // metrics.
 
-    // Create EtcdOpLogStore once before the loop to avoid repeated
+    // Create OpLogStore once before the loop to avoid repeated
     // construction/destruction overhead (constructor does etcd I/O and
     // spawns background threads).
-#ifdef STORE_USE_ETCD
-    std::unique_ptr<EtcdOpLogStore> oplog_store;
+    std::unique_ptr<OpLogStore> repl_oplog_store;
     if (!cluster_id_.empty()) {
-        oplog_store = std::make_unique<EtcdOpLogStore>(
-            cluster_id_, /*enable_latest_seq_batch_update=*/false);
-        if (oplog_store->Init() != ErrorCode::OK) {
-            LOG(ERROR)
-                << "Failed to initialize oplog_store in replication loop";
-            oplog_store.reset();
+        repl_oplog_store = OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::READER);
+        if (!repl_oplog_store) {
+            LOG(ERROR) << "Failed to create OpLogStore in replication loop";
         }
     }
-#endif
 
     while (IsRunning()) {
         if (!IsConnected()) {
@@ -600,15 +610,13 @@ void HotStandbyService::ReplicationLoop() {
         // Update primary_seq_id by querying etcd `/latest` (best-effort).
         // Note: `/latest` is batch-updated on Primary, so this is for
         // monitoring only.
-#ifdef STORE_USE_ETCD
-        if (oplog_store) {
+        if (repl_oplog_store) {
             uint64_t latest_seq = 0;
-            ErrorCode err = oplog_store->GetLatestSequenceId(latest_seq);
+            ErrorCode err = repl_oplog_store->GetLatestSequenceId(latest_seq);
             if (err == ErrorCode::OK) {
                 primary_seq_id_.store(latest_seq);
             }
         }
-#endif
 
         // Sleep and check again
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -644,14 +652,14 @@ void HotStandbyService::VerificationLoop() {
 
 void HotStandbyService::ApplyOpLogEntry(const OpLogEntry& entry) {
     // NOTE: This method is deprecated. OpLog entries are now applied via
-    // OpLogApplier, which is called by OpLogWatcher. This method is kept
+    // OpLogApplier, which is called by OpLogReplicator. This method is kept
     // for backward compatibility but should not be used in the new etcd-based
     // implementation.
 
     // Update applied_seq_id for status tracking
     applied_seq_id_.store(entry.sequence_id);
 
-    // The actual application is handled by OpLogApplier via OpLogWatcher
+    // The actual application is handled by OpLogApplier via OpLogReplicator
     VLOG(2) << "ApplyOpLogEntry called (deprecated), sequence_id="
             << entry.sequence_id
             << ", op_type=" << static_cast<int>(entry.op_type)
@@ -666,14 +674,14 @@ void HotStandbyService::ProcessOpLogBatch(
 }
 
 bool HotStandbyService::ConnectToPrimary() {
-    // With etcd-based OpLog sync, connection is handled by OpLogWatcher
+    // With etcd-based OpLog sync, connection is handled by OpLogReplicator
     // This method is kept for compatibility but is no longer used
     LOG(INFO) << "ConnectToPrimary called (no-op with etcd-based sync)";
     return true;
 }
 
 void HotStandbyService::DisconnectFromPrimary() {
-    // With etcd-based OpLog sync, disconnection is handled by OpLogWatcher
+    // With etcd-based OpLog sync, disconnection is handled by OpLogReplicator
     // This method is kept for compatibility
     if (IsConnected()) {
         state_machine_.ProcessEvent(StandbyEvent::DISCONNECTED);
