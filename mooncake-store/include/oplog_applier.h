@@ -15,7 +15,7 @@
 namespace mooncake {
 
 // Forward declaration
-class EtcdOpLogStore;
+class OpLogStore;
 
 /**
  * @brief Apply OpLog entries to Standby metadata store with ordering guarantee
@@ -28,13 +28,15 @@ class OpLogApplier {
     /**
      * @brief Constructor
      * @param metadata_store Metadata store to apply changes to
-     * @param cluster_id Cluster ID for accessing etcd OpLog (optional, for
-     * requesting missing OpLog)
+     * @param cluster_id Cluster ID (for validation only)
+     * @param oplog_store Optional OpLogStore for requesting missing OpLog
+     *                    entries (caller owns the pointer)
      */
     explicit OpLogApplier(MetadataStore* metadata_store,
-                          const std::string& cluster_id = std::string());
+                          const std::string& cluster_id = std::string(),
+                          OpLogStore* oplog_store = nullptr);
 
-    virtual ~OpLogApplier() = default;
+    ~OpLogApplier() = default;
 
     /**
      * @brief Apply a single OpLog entry (with ordering checks)
@@ -91,14 +93,6 @@ class OpLogApplier {
     };
     GapResolveResult TryResolveGapsOnceForPromotion(size_t max_ids = 1024);
 
-   protected:
-    /**
-     * @brief Request missing OpLog entry from etcd (or mock store in tests)
-     * @param missing_seq_id Missing sequence ID
-     * @return true if entry was found and applied, false otherwise
-     */
-    virtual bool RequestMissingOpLog(uint64_t missing_seq_id);
-
    private:
     /**
      * @brief Check if the entry's sequence order is valid
@@ -126,6 +120,13 @@ class OpLogApplier {
     void ApplyRemove(const OpLogEntry& entry);
 
     /**
+     * @brief Request missing OpLog entry from the store
+     * @param missing_seq_id Missing sequence ID
+     * @return true if entry was found and applied, false otherwise
+     */
+    bool RequestMissingOpLog(uint64_t missing_seq_id);
+
+    /**
      * @brief Schedule wait for missing entries
      * @param missing_seq_id Missing sequence ID
      */
@@ -133,16 +134,9 @@ class OpLogApplier {
 
     MetadataStore* metadata_store_;
 
-    // EtcdOpLogStore for requesting missing OpLog entries (optional)
+    // OpLogStore for requesting missing OpLog entries (optional, not owned)
     std::string cluster_id_;
-    mutable std::mutex etcd_oplog_store_mutex_;
-    mutable std::unique_ptr<EtcdOpLogStore> etcd_oplog_store_;
-
-    /**
-     * @brief Get or create EtcdOpLogStore instance (lazy initialization)
-     * @return Pointer to EtcdOpLogStore, or nullptr if cluster_id is not set
-     */
-    EtcdOpLogStore* GetEtcdOpLogStore() const;
+    OpLogStore* oplog_store_{nullptr};
 
     // Note: key_sequence_map_ has been removed.
     // Global sequence_id is sufficient for ordering guarantee.

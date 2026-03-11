@@ -12,7 +12,6 @@
 
 #include <xxhash.h>
 
-#include "etcd_oplog_store.h"
 #include "metadata_store.h"
 #include "mock_oplog_store.h"
 #include "oplog_manager.h"
@@ -269,35 +268,6 @@ TEST_F(OpLogApplierTest, TestApplyDuplicateSequenceId) {
 
 // ========== 4.1.3 Gap resolution tests ==========
 
-// Testable subclass that overrides RequestMissingOpLog to use MockOpLogStore
-class TestableOpLogApplier : public OpLogApplier {
-   public:
-    TestableOpLogApplier(MetadataStore* metadata_store,
-                         MockOpLogStore* mock_store)
-        : OpLogApplier(metadata_store, "test_cluster"),
-          mock_store_(mock_store) {}
-
-   protected:
-    bool RequestMissingOpLog(uint64_t missing_seq_id) override {
-        if (!mock_store_) return false;
-        OpLogEntry entry;
-        ErrorCode err = mock_store_->ReadOpLog(missing_seq_id, entry);
-        if (err != ErrorCode::OK) return false;
-
-        std::string size_reason;
-        if (!OpLogManager::ValidateEntrySize(entry, &size_reason)) return false;
-        if (!OpLogManager::VerifyChecksum(entry)) return false;
-
-        // Mimic the original RequestMissingOpLog: add to pending entries
-        // The caller (ProcessPendingEntries) will process it in the next loop
-        ApplyOpLogEntry(entry);
-        return true;
-    }
-
-   private:
-    MockOpLogStore* mock_store_;
-};
-
 class OpLogApplierGapTest : public ::testing::Test {
    protected:
     void SetUp() override {
@@ -305,14 +275,15 @@ class OpLogApplierGapTest : public ::testing::Test {
         FLAGS_logtostderr = 1;
         mock_metadata_store_ = std::make_unique<MockMetadataStore>();
         mock_oplog_store_ = std::make_unique<MockOpLogStore>();
-        applier_ = std::make_unique<TestableOpLogApplier>(
-            mock_metadata_store_.get(), mock_oplog_store_.get());
+        applier_ = std::make_unique<OpLogApplier>(
+            mock_metadata_store_.get(), "test_cluster",
+            mock_oplog_store_.get());
     }
     void TearDown() override { google::ShutdownGoogleLogging(); }
 
     std::unique_ptr<MockMetadataStore> mock_metadata_store_;
     std::unique_ptr<MockOpLogStore> mock_oplog_store_;
-    std::unique_ptr<TestableOpLogApplier> applier_;
+    std::unique_ptr<OpLogApplier> applier_;
 };
 
 TEST_F(OpLogApplierGapTest, RequestMissingOpLog_Success) {
