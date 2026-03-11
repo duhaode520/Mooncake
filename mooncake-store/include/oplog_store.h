@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "oplog_change_notifier.h"
 #include "oplog_manager.h"
 #include "types.h"
 
@@ -20,9 +21,6 @@ inline bool NormalizeAndValidateClusterId(std::string& cluster_id) {
     }
     return cluster_id.empty() || IsValidClusterIdComponent(cluster_id);
 }
-
-// Forward declaration
-class OpLogChangeNotifier;
 
 // Abstract interface for OpLog persistent storage.
 // Implementations: EtcdOpLogStore, (future) HdfsOpLogStore, etc.
