@@ -47,14 +47,6 @@ add_store_test(mutex_test mutex_test.cpp)
 add_store_test(file_storage_test file_storage_test.cpp)
 add_store_test(task_manager_test task_manager_test.cpp)
 
-# Hot Standby Unit Tests
-add_store_test(standby_state_machine_test hot_standby_ut/standby_state_machine_test.cpp)
-add_store_test(oplog_manager_test hot_standby_ut/oplog_manager_test.cpp)
-add_store_test(etcd_oplog_store_test hot_standby_ut/etcd_oplog_store_test.cpp)
-add_store_test(oplog_applier_test hot_standby_ut/oplog_applier_test.cpp)
-add_store_test(oplog_watcher_test hot_standby_ut/oplog_watcher_test.cpp)
-add_store_test(hot_standby_service_test hot_standby_ut/hot_standby_service_test.cpp)
-add_store_test(ha_metric_manager_test hot_standby_ut/ha_metric_manager_test.cpp)
 add_store_test(hot_standby_integration_test hot_standby_integration_test.cpp)
 
 add_subdirectory(e2e)
@@ -72,13 +64,31 @@ if (STORE_USE_ETCD)
 endif()
 
 add_executable(stress_workload_test stress_workload_test.cpp)
-target_link_libraries(stress_workload_test PUBLIC
-    mooncake_store
-    transfer_engine
-    cachelib_memory_allocator
-    ${ETCD_WRAPPER_LIB}
-    mooncake_common
-    glog
-    gflags
-    pthread
-)
+target_link_libraries(
+  stress_workload_test
+  PUBLIC mooncake_store
+         transfer_engine
+         cachelib_memory_allocator
+         ${ETCD_WRAPPER_LIB}
+         mooncake_common
+         glog
+         gflags
+         pthread)
+
+# Hot standby UTs (tests/hot_standby_ut)
+add_hot_standby_ut_test(standby_state_machine_test
+                        hot_standby_ut/standby_state_machine_test.cpp)
+add_hot_standby_ut_test(oplog_applier_test
+                        hot_standby_ut/oplog_applier_test.cpp)
+add_hot_standby_ut_test(oplog_manager_test
+                        hot_standby_ut/oplog_manager_test.cpp)
+add_hot_standby_ut_test(oplog_watcher_test
+                        hot_standby_ut/oplog_watcher_test.cpp)
+add_hot_standby_ut_test(ha_metric_manager_test
+                        hot_standby_ut/ha_metric_manager_test.cpp)
+add_hot_standby_ut_test(hot_standby_service_test
+                        hot_standby_ut/hot_standby_service_test.cpp)
+add_hot_standby_ut_test(etcd_oplog_store_test
+                        hot_standby_ut/etcd_oplog_store_test.cpp)
+add_hot_standby_ut_test(oplog_serializer_test
+                        hot_standby_ut/oplog_serializer_test.cpp)
