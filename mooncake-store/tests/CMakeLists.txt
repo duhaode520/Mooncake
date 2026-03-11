@@ -111,3 +111,5 @@ add_hot_standby_ut_test(hot_standby_service_test
                         hot_standby_ut/hot_standby_service_test.cpp)
 add_hot_standby_ut_test(etcd_oplog_store_test
                         hot_standby_ut/etcd_oplog_store_test.cpp)
+add_hot_standby_ut_test(oplog_serializer_test
+                        hot_standby_ut/oplog_serializer_test.cpp)
