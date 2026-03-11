@@ -283,6 +283,38 @@ TEST_F(OpLogManagerTest, TestLargePayload) {
     EXPECT_EQ(1u, M().GetEntryCount());
 }
 
+TEST_F(OpLogManagerTest, TestAppendMultipleTypes) {
+    uint64_t id1 = M().Append(OpType::PUT_END, "k1", "payload");
+    uint64_t id2 = M().Append(OpType::PUT_REVOKE, "k2", "");
+    uint64_t id3 = M().Append(OpType::REMOVE, "k3", "");
+    EXPECT_EQ(id1 + 1, id2);
+    EXPECT_EQ(id2 + 1, id3);
+    EXPECT_EQ(3u, M().GetEntryCount());
+}
+
+TEST_F(OpLogManagerTest, TestBufferEviction) {
+    for (int i = 0; i < 10; ++i) {
+        M().Append(OpType::PUT_END, "key_" + std::to_string(i), "val");
+    }
+    EXPECT_EQ(10u, M().GetEntryCount());
+}
+
+TEST_F(OpLogManagerTest, TestAllocateEntry_ChecksumValid) {
+    OpLogEntry e = M().AllocateEntry(OpType::REMOVE, "del-key", "some-data");
+    EXPECT_TRUE(OpLogManager::VerifyChecksum(e));
+}
+
+TEST_F(OpLogManagerTest, TestAllocateEntry_FieldsComplete) {
+    OpLogEntry e = M().AllocateEntry(OpType::REMOVE, "del-key", "");
+    EXPECT_EQ(OpType::REMOVE, e.op_type);
+    EXPECT_EQ("del-key", e.object_key);
+    EXPECT_EQ("", e.payload);
+    EXPECT_NE(0u, e.timestamp_ms);
+    EXPECT_TRUE(OpLogManager::VerifyChecksum(e));
+    // "del-key" prefix hash
+    EXPECT_NE(0u, e.prefix_hash);
+}
+
 }  // namespace mooncake::test
 
 int main(int argc, char** argv) {
