@@ -33,6 +33,11 @@ EtcdOpLogChangeNotifier::EtcdOpLogChangeNotifier(const std::string& cluster_id,
 
 EtcdOpLogChangeNotifier::~EtcdOpLogChangeNotifier() {
     Stop();
+    // If Stop() returned early (Change Notifier was never started), callback_ctx_
+    // was never freed.  It is safe to delete here because no goroutine / watch
+    // thread was ever launched, so no callbacks can be in-flight.
+    // In all other paths, Stop() already sets callback_ctx_ to nullptr,
+    // so `delete nullptr` is a harmless no-op.
     delete callback_ctx_;
     callback_ctx_ = nullptr;
 }

@@ -19,6 +19,7 @@ OpLogWatcher::OpLogWatcher(OpLogChangeNotifier* notifier, OpLogApplier* applier)
 OpLogWatcher::~OpLogWatcher() { Stop(); }
 
 void OpLogWatcher::Start() {
+    // Backward-compatible: start from the last processed sequence id.
     (void)StartFromSequenceId(last_processed_sequence_id_.load());
 }
 
