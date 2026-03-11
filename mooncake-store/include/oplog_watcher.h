@@ -125,17 +125,20 @@ class OpLogWatcher {
      */
     void WatchOpLog();
 
+   protected:
     /**
      * @brief Process a Watch event
      * @param key etcd key
      * @param value etcd value (JSON string for PUT events, empty for DELETE events)
      * @param event_type Event type (0 = PUT, 1 = DELETE)
      */
-    void HandleWatchEvent(const std::string& key, const std::string& value,
-                          int event_type);
-    void HandleWatchEvent(const std::string& key, const std::string& value,
-                          int event_type, int64_t mod_revision);
+    virtual void HandleWatchEvent(const std::string& key,
+                                  const std::string& value, int event_type);
+    virtual void HandleWatchEvent(const std::string& key,
+                                  const std::string& value, int event_type,
+                                  int64_t mod_revision);
 
+   private:
     /**
      * @brief Deserialize OpLogEntry from JSON string
      * @param json_str JSON string
