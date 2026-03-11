@@ -33,6 +33,7 @@ set(MOONCAKE_STORE_SOURCES
     task_manager.cpp
     local_hot_cache.cpp
     oplog_manager.cpp
+    oplog_serializer.cpp
     etcd_oplog_store.cpp
     oplog_watcher.cpp
     oplog_applier.cpp
