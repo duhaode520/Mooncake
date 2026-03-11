@@ -7,21 +7,20 @@
 #include <vector>
 
 #include "oplog_manager.h"
+#include "oplog_store.h"
 #include "types.h"
 
 namespace mooncake::test {
 
 // In-memory OpLog store for unit tests.
-// Interface matches EtcdOpLogStore public methods.
-// After OpLogStore base class is introduced (Phase 2), this will inherit from
-// it.
-class MockOpLogStore {
+class MockOpLogStore : public OpLogStore {
    public:
     MockOpLogStore() = default;
 
-    ErrorCode Init() { return ErrorCode::OK; }
+    ErrorCode Init() override { return ErrorCode::OK; }
 
-    ErrorCode WriteOpLog(const OpLogEntry& entry, bool /*sync*/ = true) {
+    ErrorCode WriteOpLog(const OpLogEntry& entry,
+                         bool /*sync*/ = true) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (write_error_ != ErrorCode::OK) {
             return write_error_;
@@ -33,7 +32,7 @@ class MockOpLogStore {
         return ErrorCode::OK;
     }
 
-    ErrorCode ReadOpLog(uint64_t sequence_id, OpLogEntry& entry) {
+    ErrorCode ReadOpLog(uint64_t sequence_id, OpLogEntry& entry) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (read_error_ != ErrorCode::OK) {
             return read_error_;
@@ -47,7 +46,7 @@ class MockOpLogStore {
     }
 
     ErrorCode ReadOpLogSince(uint64_t start_sequence_id, size_t limit,
-                             std::vector<OpLogEntry>& entries) {
+                             std::vector<OpLogEntry>& entries) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (read_error_ != ErrorCode::OK) {
             return read_error_;
@@ -62,13 +61,13 @@ class MockOpLogStore {
         return ErrorCode::OK;
     }
 
-    ErrorCode GetLatestSequenceId(uint64_t& sequence_id) {
+    ErrorCode GetLatestSequenceId(uint64_t& sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         sequence_id = latest_seq_id_;
         return ErrorCode::OK;
     }
 
-    ErrorCode GetMaxSequenceId(uint64_t& sequence_id) {
+    ErrorCode GetMaxSequenceId(uint64_t& sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (entries_.empty()) {
             return ErrorCode::ETCD_KEY_NOT_EXIST;
@@ -77,21 +76,21 @@ class MockOpLogStore {
         return ErrorCode::OK;
     }
 
-    ErrorCode UpdateLatestSequenceId(uint64_t sequence_id) {
+    ErrorCode UpdateLatestSequenceId(uint64_t sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         latest_seq_id_ = sequence_id;
         return ErrorCode::OK;
     }
 
     ErrorCode RecordSnapshotSequenceId(const std::string& snapshot_id,
-                                       uint64_t sequence_id) {
+                                       uint64_t sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshots_[snapshot_id] = sequence_id;
         return ErrorCode::OK;
     }
 
     ErrorCode GetSnapshotSequenceId(const std::string& snapshot_id,
-                                    uint64_t& sequence_id) {
+                                    uint64_t& sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = snapshots_.find(snapshot_id);
         if (it == snapshots_.end()) {
@@ -101,7 +100,7 @@ class MockOpLogStore {
         return ErrorCode::OK;
     }
 
-    ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id) {
+    ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto it = entries_.begin(); it != entries_.end();) {
             if (it->first < before_sequence_id) {
