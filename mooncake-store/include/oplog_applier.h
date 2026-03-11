@@ -34,6 +34,8 @@ class OpLogApplier {
     explicit OpLogApplier(MetadataStore* metadata_store,
                           const std::string& cluster_id = std::string());
 
+    virtual ~OpLogApplier() = default;
+
     /**
      * @brief Apply a single OpLog entry (with ordering checks)
      * @param entry OpLog entry to apply
@@ -89,6 +91,14 @@ class OpLogApplier {
     };
     GapResolveResult TryResolveGapsOnceForPromotion(size_t max_ids = 1024);
 
+   protected:
+    /**
+     * @brief Request missing OpLog entry from etcd (or mock store in tests)
+     * @param missing_seq_id Missing sequence ID
+     * @return true if entry was found and applied, false otherwise
+     */
+    virtual bool RequestMissingOpLog(uint64_t missing_seq_id);
+
    private:
     /**
      * @brief Check if the entry's sequence order is valid
@@ -114,13 +124,6 @@ class OpLogApplier {
      * @param entry OpLog entry
      */
     void ApplyRemove(const OpLogEntry& entry);
-
-    /**
-     * @brief Request missing OpLog entry from etcd
-     * @param missing_seq_id Missing sequence ID
-     * @return true if entry was found and applied, false otherwise
-     */
-    bool RequestMissingOpLog(uint64_t missing_seq_id);
 
     /**
      * @brief Schedule wait for missing entries
