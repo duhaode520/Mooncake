@@ -30,9 +30,10 @@ class MasterClient {
         coro_io::client_pool<coro_rpc::coro_rpc_client>::pool_config
             pool_conf{};
 
-        // Disable alive_detect to prevent stale reconnection logs after HA failover.
-        // Old client_pool objects remain in client_pools_ map and would otherwise
-        // continue probing failed addresses indefinitely. See PR #1642.
+        // Disable alive_detect to prevent stale reconnection logs after HA
+        // failover. Old client_pool objects remain in client_pools_ map and
+        // would otherwise continue probing failed addresses indefinitely. See
+        // PR #1642.
         pool_conf.host_alive_detect_duration = std::chrono::seconds(0);
         const char* value = std::getenv("MC_RPC_PROTOCOL");
         if (value && std::string_view(value) == "rdma") {
