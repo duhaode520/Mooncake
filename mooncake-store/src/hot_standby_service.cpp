@@ -239,6 +239,11 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     static constexpr int kMaxStartRetries = 3;
     static constexpr int kStartRetryBaseMs = 500;
     bool watcher_started = false;
+    if (!oplog_watcher_) {
+        LOG(ERROR) << "OpLogWatcher is not available, cannot start watching";
+        state_machine_.ProcessEvent(StandbyEvent::FATAL_ERROR);
+        return ErrorCode::INTERNAL_ERROR;
+    }
     for (int attempt = 0; attempt < kMaxStartRetries; ++attempt) {
         if (oplog_watcher_->StartFromSequenceId(last_applied_seq_id)) {
             watcher_started = true;
