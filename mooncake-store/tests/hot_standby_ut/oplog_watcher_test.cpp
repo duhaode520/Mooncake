@@ -7,17 +7,15 @@
 #include <chrono>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <xxhash.h>
 
-#include "etcd_oplog_store.h"
 #include "metadata_store.h"
 #include "oplog_applier.h"
+#include "oplog_change_notifier.h"
 #include "oplog_manager.h"
 #include "oplog_serializer.h"
-#include "standby_state_machine.h"
 #include "types.h"
 
 namespace mooncake::test {
@@ -39,13 +37,32 @@ class MinimalMockMetadataStore : public MetadataStore {
     size_t GetKeyCount() const override { return 0; }
 };
 
-// Simple wrapper around OpLogApplier for testing OpLogWatcher.
-class MockOpLogApplier : public OpLogApplier {
+// In-memory MockOpLogChangeNotifier for tests
+class MockOpLogChangeNotifier : public OpLogChangeNotifier {
    public:
-    MockOpLogApplier() : OpLogApplier(&metadata_store_, "test_cluster") {}
+    ErrorCode Start(uint64_t /*start_seq*/,
+                    EntryCallback on_entry,
+                    ErrorCallback on_error) override {
+        on_entry_ = std::move(on_entry);
+        on_error_ = std::move(on_error);
+        healthy_ = true;
+        return ErrorCode::OK;
+    }
+    void Stop() override { healthy_ = false; }
+    bool IsHealthy() const override { return healthy_; }
+
+    // Test helpers
+    void InjectEntry(const OpLogEntry& entry) {
+        if (on_entry_) on_entry_(entry);
+    }
+    void InjectError(ErrorCode err) {
+        if (on_error_) on_error_(err);
+    }
 
    private:
-    MinimalMockMetadataStore metadata_store_;
+    EntryCallback on_entry_;
+    ErrorCallback on_error_;
+    bool healthy_{false};
 };
 
 // Helper function to create a valid OpLogEntry with checksum
@@ -72,11 +89,12 @@ class OpLogWatcherTest : public ::testing::Test {
     void SetUp() override {
         google::InitGoogleLogging("OpLogWatcherTest");
         FLAGS_logtostderr = 1;
-        etcd_endpoints_ = "http://localhost:2379";
-        cluster_id_ = "test_cluster_001";
-        mock_applier_ = std::make_unique<MockOpLogApplier>();
-        watcher_ = std::make_unique<OpLogWatcher>(etcd_endpoints_, cluster_id_,
-                                                  mock_applier_.get());
+        metadata_store_ = std::make_unique<MinimalMockMetadataStore>();
+        applier_ =
+            std::make_unique<OpLogApplier>(metadata_store_.get(), "test");
+        notifier_ = std::make_unique<MockOpLogChangeNotifier>();
+        watcher_ = std::make_unique<OpLogWatcher>(notifier_.get(),
+                                                  applier_.get());
     }
 
     void TearDown() override {
@@ -86,133 +104,73 @@ class OpLogWatcherTest : public ::testing::Test {
         google::ShutdownGoogleLogging();
     }
 
-    // Helper to call protected HandleWatchEvent from tests
-    void CallHandleWatchEvent(const std::string& key, const std::string& value,
-                              int event_type, int64_t mod_revision) {
-        // Use a helper subclass to access protected member
-        struct Accessor : public OpLogWatcher {
-            using OpLogWatcher::HandleWatchEvent;
-        };
-        (static_cast<Accessor*>(watcher_.get()))
-            ->HandleWatchEvent(key, value, event_type, mod_revision);
-    }
+    MockOpLogChangeNotifier& Notifier() { return *notifier_; }
 
-    std::string etcd_endpoints_;
-    std::string cluster_id_;
-    std::unique_ptr<MockOpLogApplier> mock_applier_;
+    std::unique_ptr<MinimalMockMetadataStore> metadata_store_;
+    std::unique_ptr<OpLogApplier> applier_;
+    std::unique_ptr<MockOpLogChangeNotifier> notifier_;
     std::unique_ptr<OpLogWatcher> watcher_;
 };
 
-// ========== Start/Stop tests (still SKIP - require real etcd) ==========
+// ========== Start/Stop tests ==========
 
-TEST_F(OpLogWatcherTest, TestStart) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real etcd connection, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
+TEST_F(OpLogWatcherTest, TestStartStop) {
+    EXPECT_TRUE(watcher_->StartFromSequenceId(0));
+    EXPECT_TRUE(watcher_->IsWatchHealthy());
+    watcher_->Stop();
+    EXPECT_FALSE(watcher_->IsWatchHealthy());
 }
 
 TEST_F(OpLogWatcherTest, TestStartFromSequenceId) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real etcd connection, skipping integration test";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
+    EXPECT_TRUE(watcher_->StartFromSequenceId(100));
+    EXPECT_TRUE(watcher_->IsWatchHealthy());
 }
 
-TEST_F(OpLogWatcherTest, TestStop) {
-#ifdef STORE_USE_ETCD
-    watcher_->Stop();
-    EXPECT_FALSE(watcher_->IsWatchHealthy());
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
-}
+// ========== Entry delivery tests ==========
 
-// ========== HandleWatchEvent tests (now testable via protected virtual) ====
+TEST_F(OpLogWatcherTest, InjectEntry_Applied) {
+    watcher_->StartFromSequenceId(0);
 
-TEST_F(OpLogWatcherTest, HandleWatchEvent_PutValid) {
     OpLogEntry entry = MakeEntry(1, OpType::PUT_END, "key1", "payload1");
-    std::string json_value = SerializeOpLogEntry(entry);
-    std::string key = "/oplog/" + cluster_id_ + "/00000000000000000001";
+    Notifier().InjectEntry(entry);
 
-    // PUT event (type=0)
-    CallHandleWatchEvent(key, json_value, 0, 100);
-
-    // Verify applier received the entry
-    EXPECT_EQ(2u, mock_applier_->GetExpectedSequenceId());
+    EXPECT_EQ(1u, watcher_->GetLastProcessedSequenceId());
+    EXPECT_EQ(2u, applier_->GetExpectedSequenceId());
 }
 
-TEST_F(OpLogWatcherTest, HandleWatchEvent_DeleteIgnored) {
-    std::string key = "/oplog/" + cluster_id_ + "/00000000000000000001";
+TEST_F(OpLogWatcherTest, InjectMultipleEntries_SequenceTracking) {
+    watcher_->StartFromSequenceId(0);
 
-    // DELETE event (type=1) should be silently ignored
-    CallHandleWatchEvent(key, "", 1, 100);
+    Notifier().InjectEntry(MakeEntry(1, OpType::PUT_END, "k1", "p1"));
+    Notifier().InjectEntry(MakeEntry(2, OpType::PUT_END, "k2", "p2"));
+    Notifier().InjectEntry(MakeEntry(3, OpType::REMOVE, "k3", ""));
 
-    // Applier should not have been called
-    EXPECT_EQ(1u, mock_applier_->GetExpectedSequenceId());
+    EXPECT_EQ(3u, watcher_->GetLastProcessedSequenceId());
+    EXPECT_EQ(4u, applier_->GetExpectedSequenceId());
 }
 
-TEST_F(OpLogWatcherTest, HandleWatchEvent_InvalidJson) {
-    std::string key = "/oplog/" + cluster_id_ + "/00000000000000000001";
+TEST_F(OpLogWatcherTest, InjectError_NotifiesCallback) {
+    bool error_received = false;
+    watcher_->SetStateCallback([&](StandbyEvent event) {
+        if (event == StandbyEvent::WATCH_BROKEN) {
+            error_received = true;
+        }
+    });
 
-    // Invalid JSON should not crash
-    CallHandleWatchEvent(key, "{ invalid }", 0, 100);
+    watcher_->StartFromSequenceId(0);
+    Notifier().InjectError(ErrorCode::ETCD_OPERATION_ERROR);
 
-    EXPECT_EQ(1u, mock_applier_->GetExpectedSequenceId());
-}
-
-TEST_F(OpLogWatcherTest, HandleWatchEvent_LatestKeyIgnored) {
-    std::string key = "/oplog/" + cluster_id_ + "/latest";
-    CallHandleWatchEvent(key, "123", 0, 100);
-
-    EXPECT_EQ(1u, mock_applier_->GetExpectedSequenceId());
-}
-
-TEST_F(OpLogWatcherTest, HandleWatchEvent_SequenceTracking) {
-    std::string payload1_json =
-        SerializeOpLogEntry(MakeEntry(1, OpType::PUT_END, "k1", "p1"));
-    std::string payload2_json =
-        SerializeOpLogEntry(MakeEntry(2, OpType::PUT_END, "k2", "p2"));
-
-    CallHandleWatchEvent("/oplog/" + cluster_id_ + "/00000000000000000001",
-                         payload1_json, 0, 100);
-    CallHandleWatchEvent("/oplog/" + cluster_id_ + "/00000000000000000002",
-                         payload2_json, 0, 101);
-
-    EXPECT_EQ(2u, watcher_->GetLastProcessedSequenceId());
-}
-
-// ========== Reconnection tests (still SKIP - require real etcd) ==========
-
-TEST_F(OpLogWatcherTest, TestReconnectAfterDisconnect) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP()
-        << "Requires real etcd connection and watch failure simulation";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
-}
-
-TEST_F(OpLogWatcherTest, TestReconnectResumeFromLastSequence) {
-#ifdef STORE_USE_ETCD
-    GTEST_SKIP() << "Requires real etcd connection and reconnection simulation";
-#else
-    GTEST_SKIP() << "STORE_USE_ETCD not enabled";
-#endif
+    EXPECT_TRUE(error_received);
 }
 
 // ========== Utility tests ==========
 
-TEST_F(OpLogWatcherTest, TestInvalidClusterId_Rejected) {
-    std::string valid_cluster_id = "test_cluster_001";
-    std::unique_ptr<MockOpLogApplier> mock_applier =
-        std::make_unique<MockOpLogApplier>();
-    std::unique_ptr<OpLogWatcher> watcher = std::make_unique<OpLogWatcher>(
-        etcd_endpoints_, valid_cluster_id, mock_applier.get());
-    EXPECT_NE(nullptr, watcher);
-    watcher->Stop();
+TEST_F(OpLogWatcherTest, GetLastProcessedSequenceId_InitiallyZero) {
+    EXPECT_EQ(0u, watcher_->GetLastProcessedSequenceId());
+}
+
+TEST_F(OpLogWatcherTest, IsWatchHealthy_FalseBeforeStart) {
+    EXPECT_FALSE(watcher_->IsWatchHealthy());
 }
 
 }  // namespace mooncake::test

@@ -13,7 +13,9 @@
 
 #include "metadata_store.h"
 #include "oplog_applier.h"
+#include "oplog_change_notifier.h"
 #include "oplog_manager.h"
+#include "oplog_store.h"
 #include "oplog_watcher.h"
 #include "snapshot_provider.h"
 #include "standby_state_machine.h"
@@ -220,6 +222,8 @@ class HotStandbyService {
 
     // OpLog replication components
     std::unique_ptr<OpLogApplier> oplog_applier_;
+    std::unique_ptr<OpLogStore> watcher_oplog_store_;
+    std::unique_ptr<OpLogChangeNotifier> oplog_change_notifier_;
     std::unique_ptr<OpLogWatcher> oplog_watcher_;
 
     // Configuration for etcd-based OpLog sync

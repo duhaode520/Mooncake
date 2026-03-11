@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "etcd_helper.h"
+#include "etcd_oplog_change_notifier.h"
 #include "etcd_oplog_store.h"
 #include "ha_metric_manager.h"
 #include "master_service.h"
@@ -185,9 +186,20 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
         oplog_applier_->Recover(local_last_seq_id);
     }
 
-    // Create OpLogWatcher with state machine callback
-    oplog_watcher_ = std::make_unique<OpLogWatcher>(etcd_endpoints, cluster_id,
-                                                    oplog_applier_.get());
+    // Create OpLogChangeNotifier and OpLogWatcher
+    {
+        auto etcd_store = std::make_unique<EtcdOpLogStore>(
+            cluster_id, /*enable_latest_seq_batch_update=*/false);
+        if (etcd_store->Init() != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to initialize EtcdOpLogStore for watcher";
+        }
+        watcher_oplog_store_ = std::move(etcd_store);
+        oplog_change_notifier_ = std::make_unique<EtcdOpLogChangeNotifier>(
+            cluster_id,
+            static_cast<EtcdOpLogStore*>(watcher_oplog_store_.get()));
+    }
+    oplog_watcher_ = std::make_unique<OpLogWatcher>(
+        oplog_change_notifier_.get(), oplog_applier_.get());
 
     // Register callback for watcher events
     oplog_watcher_->SetStateCallback(
