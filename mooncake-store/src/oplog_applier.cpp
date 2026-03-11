@@ -22,18 +22,9 @@ OpLogApplier::OpLogApplier(MetadataStore* metadata_store,
     if (metadata_store_ == nullptr) {
         LOG(FATAL) << "OpLogApplier: metadata_store cannot be null";
     }
-
-    // Validate cluster_id if provided (required for etcd operations).
-    // Normalize by stripping trailing slashes for validation.
-    std::string normalized = cluster_id_;
-    while (!normalized.empty() && normalized.back() == '/') {
-        normalized.pop_back();
-    }
-    if (!normalized.empty() && !IsValidClusterIdComponent(normalized)) {
-        LOG(FATAL)
-            << "Invalid cluster_id for OpLogApplier: '" << cluster_id_
-            << "' (normalized: '" << normalized
-            << "'). Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
+    if (!NormalizeAndValidateClusterId(cluster_id_)) {
+        LOG(FATAL) << "Invalid cluster_id for OpLogApplier: '" << cluster_id_
+                   << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128.";
     }
 }
 

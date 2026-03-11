@@ -81,6 +81,16 @@ inline bool IsValidClusterIdComponent(const std::string& cluster_id) {
     }
     return true;
 }
+
+// Normalize a cluster_id by stripping trailing slashes, then validate.
+// Returns true if valid (or empty). Returns false if invalid.
+inline bool NormalizeAndValidateClusterId(std::string& cluster_id) {
+    while (!cluster_id.empty() && cluster_id.back() == '/') {
+        cluster_id.pop_back();
+    }
+    return cluster_id.empty() || IsValidClusterIdComponent(cluster_id);
+}
+
 static constexpr uint64_t DEFAULT_DEFAULT_KV_LEASE_TTL =
     5000;  // in milliseconds
 static constexpr uint64_t DEFAULT_KV_SOFT_PIN_TTL_MS =

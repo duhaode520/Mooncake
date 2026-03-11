@@ -71,7 +71,13 @@ class EtcdOpLogChangeNotifier : public OpLogChangeNotifier {
     // Sync missed entries after reconnection.
     bool SyncMissedEntries();
 
+    // Read and deliver all entries since start_seq_id. Updates
+    // last_processed_sequence_id_ and next_watch_revision_.
+    // Returns the number of delivered entries, or -1 on read failure.
+    int64_t DeliverHistoricalEntries(uint64_t start_seq_id);
+
     std::string cluster_id_;
+    std::string watch_prefix_;  // "/oplog/{cluster_id}/"
     EtcdOpLogStore* oplog_store_;  // Not owned
 
     EntryCallback on_entry_;

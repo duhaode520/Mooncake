@@ -26,14 +26,7 @@ EtcdOpLogStore::EtcdOpLogStore(const std::string& cluster_id,
       enable_latest_seq_batch_update_(enable_latest_seq_batch_update),
       enable_batch_write_(enable_batch_write),
       last_update_time_(std::chrono::steady_clock::now()) {
-    // Normalize cluster_id to avoid accidental double slashes in etcd keys when
-    // caller passes a trailing '/' (master_view_key uses trailing '/', OpLog
-    // keys don't).
-    while (!cluster_id_.empty() && cluster_id_.back() == '/') {
-        cluster_id_.pop_back();
-    }
-
-    if (!cluster_id_.empty() && !IsValidClusterIdComponent(cluster_id_)) {
+    if (!NormalizeAndValidateClusterId(cluster_id_)) {
         LOG(FATAL)
             << "Invalid cluster_id for EtcdOpLogStore: '" << cluster_id_
             << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
