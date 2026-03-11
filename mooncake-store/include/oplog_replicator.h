@@ -17,28 +17,28 @@ namespace mooncake {
 class OpLogApplier;
 
 // Callback type for state events
-using WatcherStateCallback = std::function<void(StandbyEvent)>;
+using ReplicatorStateCallback = std::function<void(StandbyEvent)>;
 
 /**
- * @brief Watch OpLog changes and apply them to Standby.
+ * @brief Replicate OpLog entries from a remote source and apply them locally.
  *
  * Delegates watch/notification to an OpLogChangeNotifier and applies
  * received entries via OpLogApplier. This class is a thin orchestration
  * layer; the actual watch implementation lives in OpLogChangeNotifier.
  */
-class OpLogWatcher {
+class OpLogReplicator {
    public:
     /**
      * @brief Constructor
      * @param notifier Change notifier that delivers OpLog entries
      * @param applier OpLog applier to process entries
      */
-    OpLogWatcher(OpLogChangeNotifier* notifier, OpLogApplier* applier);
+    OpLogReplicator(OpLogChangeNotifier* notifier, OpLogApplier* applier);
 
-    ~OpLogWatcher();
+    ~OpLogReplicator();
 
     /**
-     * @brief Start watching from the beginning.
+     * @brief Start replication from the beginning.
      */
     void Start();
 
@@ -48,7 +48,7 @@ class OpLogWatcher {
     bool StartFromSequenceId(uint64_t start_seq_id);
 
     /**
-     * @brief Stop watching.
+     * @brief Stop replication.
      */
     void Stop();
 
@@ -60,14 +60,14 @@ class OpLogWatcher {
     /**
      * @brief Set callback for state events.
      */
-    void SetStateCallback(WatcherStateCallback callback) {
+    void SetStateCallback(ReplicatorStateCallback callback) {
         state_callback_ = std::move(callback);
     }
 
     /**
-     * @brief Check if watch is healthy.
+     * @brief Check if replication is healthy.
      */
-    bool IsWatchHealthy() const;
+    bool IsHealthy() const;
 
    private:
     void NotifyStateEvent(StandbyEvent event) {
@@ -81,7 +81,7 @@ class OpLogWatcher {
     std::atomic<uint64_t> last_processed_sequence_id_{0};
     std::atomic<bool> running_{false};
 
-    WatcherStateCallback state_callback_;
+    ReplicatorStateCallback state_callback_;
 };
 
 }  // namespace mooncake
