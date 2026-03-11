@@ -144,7 +144,7 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
         return ErrorCode::INVALID_PARAMS;
     }
     std::string key = BuildOpLogKey(entry.sequence_id);
-    std::string value = SerializeOpLogEntry(entry);
+    std::string value = mooncake::SerializeOpLogEntry(entry);
 
     {
         std::unique_lock<std::mutex> lock(batch_mutex_);
@@ -339,7 +339,7 @@ ErrorCode EtcdOpLogStore::ReadOpLog(uint64_t sequence_id, OpLogEntry& entry) {
         return err;
     }
 
-    if (!DeserializeOpLogEntry(value, entry)) {
+    if (!mooncake::DeserializeOpLogEntry(value, entry)) {
         LOG(ERROR) << "Failed to deserialize OpLog entry, sequence_id="
                    << sequence_id;
         return ErrorCode::INTERNAL_ERROR;
@@ -441,7 +441,7 @@ ErrorCode EtcdOpLogStore::ReadOpLogSinceWithRevision(
 
             OpLogEntry entry;
             const std::string value = kv.get("value", "").asString();
-            if (!DeserializeOpLogEntry(value, entry)) {
+            if (!mooncake::DeserializeOpLogEntry(value, entry)) {
                 LOG(ERROR) << "Failed to deserialize OpLog entry from key="
                            << key;
                 return ErrorCode::INTERNAL_ERROR;
@@ -627,15 +627,6 @@ std::string EtcdOpLogStore::BuildSnapshotKey(
     oss << kOpLogPrefix << cluster_id_ << kSnapshotSuffix << snapshot_id
         << "/sequence_id";
     return oss.str();
-}
-
-std::string EtcdOpLogStore::SerializeOpLogEntry(const OpLogEntry& entry) const {
-    return mooncake::SerializeOpLogEntry(entry);
-}
-
-bool EtcdOpLogStore::DeserializeOpLogEntry(const std::string& json_str,
-                                           OpLogEntry& entry) const {
-    return mooncake::DeserializeOpLogEntry(json_str, entry);
 }
 
 void EtcdOpLogStore::BatchUpdateThread() {

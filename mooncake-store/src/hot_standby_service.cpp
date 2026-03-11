@@ -195,13 +195,12 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     if (oplog_change_notifier_) {
         oplog_watcher_ = std::make_unique<OpLogWatcher>(
             oplog_change_notifier_.get(), oplog_applier_.get());
+        // Register callback for watcher events
+        oplog_watcher_->SetStateCallback(
+            [this](StandbyEvent event) { OnWatcherEvent(event); });
     } else {
         LOG(ERROR) << "Failed to create OpLogChangeNotifier for watcher";
     }
-
-    // Register callback for watcher events
-    oplog_watcher_->SetStateCallback(
-        [this](StandbyEvent event) { OnWatcherEvent(event); });
 
     // Bootstrap:
     // - If we already have local state (warm start), do NOT reload snapshot.

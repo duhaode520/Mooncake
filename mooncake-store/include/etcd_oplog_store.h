@@ -164,22 +164,6 @@ class EtcdOpLogStore : public OpLogStore {
     std::optional<uint64_t> GetMaxSequenceIdInternal() const;
 
     /**
-     * @brief Serialize an OpLogEntry to JSON string.
-     * @param entry: The OpLog entry to serialize.
-     * @return: The JSON string.
-     */
-    std::string SerializeOpLogEntry(const OpLogEntry& entry) const;
-
-    /**
-     * @brief Deserialize a JSON string to OpLogEntry.
-     * @param json_str: The JSON string.
-     * @param entry: Output param, the OpLog entry.
-     * @return: true if successful, false otherwise.
-     */
-    bool DeserializeOpLogEntry(const std::string& json_str,
-                               OpLogEntry& entry) const;
-
-    /**
      * @brief Batch update thread function.
      * Periodically updates latest_sequence_id in etcd.
      */
