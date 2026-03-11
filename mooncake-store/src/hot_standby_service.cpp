@@ -574,7 +574,9 @@ void HotStandbyService::ReplicationLoop() {
     // in its own thread. This loop now just monitors the status and updates
     // metrics.
 
-    // Create OpLogStore once before the loop for metric queries.
+    // Create OpLogStore once before the loop to avoid repeated
+    // construction/destruction overhead (constructor does etcd I/O and
+    // spawns background threads).
     std::unique_ptr<OpLogStore> repl_oplog_store;
     if (!cluster_id_.empty()) {
         repl_oplog_store =
