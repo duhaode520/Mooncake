@@ -17,15 +17,12 @@ namespace mooncake {
 EtcdOpLogChangeNotifier::EtcdOpLogChangeNotifier(const std::string& cluster_id,
                                                  EtcdOpLogStore* oplog_store)
     : cluster_id_(cluster_id), oplog_store_(oplog_store) {
-    // Normalize cluster_id to avoid double slashes in watch prefix.
-    while (!cluster_id_.empty() && cluster_id_.back() == '/') {
-        cluster_id_.pop_back();
-    }
-    if (!cluster_id_.empty() && !IsValidClusterIdComponent(cluster_id_)) {
+    if (!NormalizeAndValidateClusterId(cluster_id_)) {
         LOG(FATAL) << "Invalid cluster_id for EtcdOpLogChangeNotifier: '"
                    << cluster_id_
                    << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128.";
     }
+    watch_prefix_ = "/oplog/" + cluster_id_ + "/";
 
     callback_ctx_ = new ChangeNotifierCallbackContext();
     callback_ctx_->notifier = this;
@@ -54,39 +51,12 @@ ErrorCode EtcdOpLogChangeNotifier::Start(uint64_t start_sequence_id,
     on_error_ = std::move(on_error);
     last_processed_sequence_id_.store(start_sequence_id);
 
-    // Initial sync: read historical entries
+    // Initial sync: read and deliver historical entries
     if (oplog_store_) {
-        uint64_t read_seq_id = start_sequence_id;
-        EtcdRevisionId last_read_rev = 0;
-
-        for (;;) {
-            std::vector<OpLogEntry> batch;
-            EtcdRevisionId rev = 0;
-            if (!ReadOpLogSince(read_seq_id, batch, rev)) {
-                last_read_rev = 0;
-                break;
-            }
-            last_read_rev = rev;
-            if (!batch.empty()) {
-                for (const auto& e : batch) {
-                    if (on_entry_) {
-                        on_entry_(e);
-                    }
-                    last_processed_sequence_id_.store(e.sequence_id);
-                    read_seq_id = e.sequence_id;
-                }
-            }
-            if (batch.size() < kSyncBatchSize) {
-                break;
-            }
-        }
-
-        if (last_read_rev > 0) {
-            next_watch_revision_.store(static_cast<int64_t>(last_read_rev + 1));
-        } else {
+        int64_t delivered = DeliverHistoricalEntries(start_sequence_id);
+        if (delivered < 0) {
             next_watch_revision_.store(0);
         }
-
         LOG(INFO) << "EtcdOpLogChangeNotifier initial sync done"
                   << ", last_seq=" << last_processed_sequence_id_.load()
                   << ", next_watch_revision=" << next_watch_revision_.load();
@@ -117,22 +87,21 @@ void EtcdOpLogChangeNotifier::Stop() {
     }
 
     // Cancel the Go goroutine and wait for it to fully exit.
-    std::string watch_prefix = "/oplog/" + cluster_id_ + "/";
-    ErrorCode err = EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(),
-                                                      watch_prefix.size());
+    ErrorCode err = EtcdHelper::CancelWatchWithPrefix(watch_prefix_.c_str(),
+                                                      watch_prefix_.size());
     if (err != ErrorCode::OK) {
-        LOG(WARNING) << "Failed to cancel watch for prefix " << watch_prefix
+        LOG(WARNING) << "Failed to cancel watch for prefix " << watch_prefix_
                      << ", error=" << static_cast<int>(err);
     }
 
     ErrorCode wait_err = EtcdHelper::WaitWatchWithPrefixStopped(
-        watch_prefix.c_str(), watch_prefix.size(), /*timeout_ms=*/5000);
+        watch_prefix_.c_str(), watch_prefix_.size(), /*timeout_ms=*/5000);
 
     if (wait_err == ErrorCode::OK) {
         delete callback_ctx_;
     } else {
         LOG(WARNING) << "Watch goroutine did not stop in time for prefix "
-                     << watch_prefix
+                     << watch_prefix_
                      << "; leaking ChangeNotifierCallbackContext to avoid UAF";
     }
     callback_ctx_ = nullptr;
@@ -193,24 +162,22 @@ void EtcdOpLogChangeNotifier::WatchCallback(void* context, const char* key,
 void EtcdOpLogChangeNotifier::WatchLoop() {
     LOG(INFO) << "OpLog watch thread started for cluster_id=" << cluster_id_;
 
-    std::string watch_prefix = "/oplog/" + cluster_id_ + "/";
-
     while (running_.load()) {
         // Cancel any existing watch before starting a new one
-        (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(),
-                                                watch_prefix.size());
-        (void)EtcdHelper::WaitWatchWithPrefixStopped(watch_prefix.c_str(),
-                                                     watch_prefix.size(),
+        (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix_.c_str(),
+                                                watch_prefix_.size());
+        (void)EtcdHelper::WaitWatchWithPrefixStopped(watch_prefix_.c_str(),
+                                                     watch_prefix_.size(),
                                                      /*timeout_ms=*/5000);
 
         EtcdRevisionId start_rev =
             static_cast<EtcdRevisionId>(next_watch_revision_.load());
         ErrorCode err = EtcdHelper::WatchWithPrefixFromRevision(
-            watch_prefix.c_str(), watch_prefix.size(), start_rev, callback_ctx_,
+            watch_prefix_.c_str(), watch_prefix_.size(), start_rev, callback_ctx_,
             WatchCallback);
 
         if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to start watch for prefix " << watch_prefix
+            LOG(ERROR) << "Failed to start watch for prefix " << watch_prefix_
                        << ", error=" << static_cast<int>(err);
             watch_healthy_.store(false);
             if (on_error_) {
@@ -222,7 +189,7 @@ void EtcdOpLogChangeNotifier::WatchLoop() {
             continue;
         }
 
-        LOG(INFO) << "Watch started for prefix " << watch_prefix;
+        LOG(INFO) << "Watch started for prefix " << watch_prefix_;
         watch_healthy_.store(true);
         consecutive_errors_.store(0);
 
@@ -239,10 +206,10 @@ void EtcdOpLogChangeNotifier::WatchLoop() {
         }
 
         if (running_.load() && !watch_healthy_.load()) {
-            (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(),
-                                                    watch_prefix.size());
-            (void)EtcdHelper::WaitWatchWithPrefixStopped(watch_prefix.c_str(),
-                                                         watch_prefix.size(),
+            (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix_.c_str(),
+                                                    watch_prefix_.size());
+            (void)EtcdHelper::WaitWatchWithPrefixStopped(watch_prefix_.c_str(),
+                                                         watch_prefix_.size(),
                                                          /*timeout_ms=*/5000);
             TryReconnect();
         }
@@ -293,7 +260,7 @@ void EtcdOpLogChangeNotifier::HandleWatchEvent(const std::string& key,
         return;
     }
 
-    // Parse the OpLog entry
+    // Parse the OpLog entry (DeserializeOpLogEntry validates entry size)
     OpLogEntry entry;
     if (!DeserializeOpLogEntry(value, entry)) {
         LOG(ERROR) << "Failed to deserialize OpLog entry from key: " << key;
@@ -301,17 +268,7 @@ void EtcdOpLogChangeNotifier::HandleWatchEvent(const std::string& key,
         return;
     }
 
-    // Basic DoS protection
-    std::string size_reason;
-    if (!OpLogManager::ValidateEntrySize(entry, &size_reason)) {
-        LOG(ERROR) << "OpLog entry size rejected: sequence_id="
-                   << entry.sequence_id << ", key=" << entry.object_key
-                   << ", reason=" << size_reason;
-        consecutive_errors_.fetch_add(1);
-        return;
-    }
-
-    // Verify checksum
+    // Verify checksum at the trust boundary (data from etcd)
     if (!OpLogManager::VerifyChecksum(entry)) {
         LOG(ERROR) << "OpLog entry checksum mismatch: sequence_id="
                    << entry.sequence_id << ", key=" << entry.object_key
@@ -367,32 +324,37 @@ bool EtcdOpLogChangeNotifier::SyncMissedEntries() {
     if (last_seq == 0) {
         return true;
     }
-
     LOG(INFO) << "Syncing missed OpLog entries since sequence_id=" << last_seq;
+    int64_t delivered = DeliverHistoricalEntries(last_seq);
+    if (delivered < 0) {
+        return false;
+    }
+    LOG(INFO) << "Synced " << delivered << " missed OpLog entries";
+    return true;
+}
 
-    uint64_t read_seq_id = last_seq;
+int64_t EtcdOpLogChangeNotifier::DeliverHistoricalEntries(
+    uint64_t start_seq_id) {
+    uint64_t read_seq_id = start_seq_id;
     EtcdRevisionId last_read_rev = 0;
-    size_t total_delivered = 0;
+    int64_t total_delivered = 0;
 
     for (;;) {
         std::vector<OpLogEntry> batch;
         EtcdRevisionId rev = 0;
         if (!ReadOpLogSince(read_seq_id, batch, rev)) {
-            LOG(ERROR) << "Failed to read missed OpLog entries";
-            return false;
+            return -1;
         }
         if (rev > 0) {
             last_read_rev = rev;
         }
-        if (!batch.empty()) {
-            for (const auto& entry : batch) {
-                if (on_entry_) {
-                    on_entry_(entry);
-                }
-                last_processed_sequence_id_.store(entry.sequence_id);
-                read_seq_id = entry.sequence_id;
-                total_delivered++;
+        for (const auto& entry : batch) {
+            if (on_entry_) {
+                on_entry_(entry);
             }
+            last_processed_sequence_id_.store(entry.sequence_id);
+            read_seq_id = entry.sequence_id;
+            total_delivered++;
         }
         if (batch.size() < kSyncBatchSize) {
             break;
@@ -403,8 +365,7 @@ bool EtcdOpLogChangeNotifier::SyncMissedEntries() {
         next_watch_revision_.store(static_cast<int64_t>(last_read_rev + 1));
     }
 
-    LOG(INFO) << "Synced " << total_delivered << " missed OpLog entries";
-    return true;
+    return total_delivered;
 }
 
 }  // namespace mooncake
@@ -458,6 +419,11 @@ void EtcdOpLogChangeNotifier::HandleWatchEvent(const std::string& /*key*/,
 void EtcdOpLogChangeNotifier::TryReconnect() {}
 
 bool EtcdOpLogChangeNotifier::SyncMissedEntries() { return false; }
+
+int64_t EtcdOpLogChangeNotifier::DeliverHistoricalEntries(
+    uint64_t /*start_seq_id*/) {
+    return -1;
+}
 
 }  // namespace mooncake
 
