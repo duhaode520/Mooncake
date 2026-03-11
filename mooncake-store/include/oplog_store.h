@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,9 @@
 #include "types.h"
 
 namespace mooncake {
+
+// Forward declaration
+class OpLogChangeNotifier;
 
 // Abstract interface for OpLog persistent storage.
 // Implementations: EtcdOpLogStore, (future) HdfsOpLogStore, etc.
@@ -38,6 +42,15 @@ class OpLogStore {
 
     // Cleanup
     virtual ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id) = 0;
+
+    // Create a change notifier for this store.
+    // Each backend provides its own notifier (e.g., etcd watch, polling).
+    // Returns nullptr if the backend does not support change notification.
+    virtual std::unique_ptr<OpLogChangeNotifier> CreateChangeNotifier(
+        const std::string& cluster_id) {
+        (void)cluster_id;
+        return nullptr;
+    }
 };
 
 }  // namespace mooncake

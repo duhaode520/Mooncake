@@ -185,12 +185,12 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
         oplog_applier_->Recover(local_last_seq_id);
     }
 
-    // Create OpLogChangeNotifier and OpLogWatcher via factory
-    watcher_oplog_store_ =
-        OpLogStoreFactory::Create(cluster_id, OpLogStoreRole::READER);
+    // Create OpLogStore, OpLogChangeNotifier, and OpLogWatcher via factory
+    watcher_oplog_store_ = OpLogStoreFactory::Create(
+        OpLogStoreType::ETCD, cluster_id, OpLogStoreRole::READER);
     if (watcher_oplog_store_) {
-        oplog_change_notifier_ = OpLogStoreFactory::CreateNotifier(
-            cluster_id, watcher_oplog_store_.get());
+        oplog_change_notifier_ =
+            watcher_oplog_store_->CreateChangeNotifier(cluster_id);
     }
     if (oplog_change_notifier_) {
         oplog_watcher_ = std::make_unique<OpLogWatcher>(
@@ -445,8 +445,8 @@ ErrorCode HotStandbyService::Promote() {
     }
 
     LOG(INFO) << "Final catch-up sync from etcd before promotion...";
-    auto catch_up_store =
-        OpLogStoreFactory::Create(cluster_id_, OpLogStoreRole::READER);
+    auto catch_up_store = OpLogStoreFactory::Create(
+        OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::READER);
     if (!catch_up_store) {
         LOG(ERROR) << "Failed to create OpLogStore for final catch-up";
         return ErrorCode::ETCD_OPERATION_ERROR;
@@ -584,8 +584,8 @@ void HotStandbyService::ReplicationLoop() {
     // spawns background threads).
     std::unique_ptr<OpLogStore> repl_oplog_store;
     if (!cluster_id_.empty()) {
-        repl_oplog_store =
-            OpLogStoreFactory::Create(cluster_id_, OpLogStoreRole::READER);
+        repl_oplog_store = OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::READER);
         if (!repl_oplog_store) {
             LOG(ERROR) << "Failed to create OpLogStore in replication loop";
         }

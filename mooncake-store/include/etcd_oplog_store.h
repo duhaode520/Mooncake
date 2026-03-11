@@ -134,6 +134,10 @@ class EtcdOpLogStore : public OpLogStore {
      */
     ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id) override;
 
+    // Create an EtcdOpLogChangeNotifier backed by this store.
+    std::unique_ptr<OpLogChangeNotifier> CreateChangeNotifier(
+        const std::string& cluster_id) override;
+
    private:
     /**
      * @brief Build the etcd key for an OpLog entry.

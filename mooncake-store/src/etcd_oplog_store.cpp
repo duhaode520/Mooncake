@@ -6,6 +6,7 @@
 
 #include "ha_metric_manager.h"
 #include "oplog_serializer.h"
+#include "etcd_oplog_change_notifier.h"
 #include "utils/base64.h"
 
 #if __has_include(<jsoncpp/json/json.h>)
@@ -627,6 +628,11 @@ std::string EtcdOpLogStore::BuildSnapshotKey(
     oss << kOpLogPrefix << cluster_id_ << kSnapshotSuffix << snapshot_id
         << "/sequence_id";
     return oss.str();
+}
+
+std::unique_ptr<OpLogChangeNotifier> EtcdOpLogStore::CreateChangeNotifier(
+    const std::string& cluster_id) {
+    return std::make_unique<EtcdOpLogChangeNotifier>(cluster_id, this);
 }
 
 void EtcdOpLogStore::BatchUpdateThread() {
