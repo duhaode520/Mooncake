@@ -67,13 +67,13 @@ TEST_F(OpLogManagerTest, TestAllocateEntry) {
     EXPECT_NE(0u, e1.prefix_hash);
 }
 
-TEST_F(OpLogManagerTest, TestPersistEntryToEtcd) {
-    // Without an EtcdOpLogStore configured, PersistEntryToEtcd should return an
+TEST_F(OpLogManagerTest, TestPersistEntry) {
+    // Without an OpLogStore configured, PersistEntry should return an
     // error
     OpLogEntry entry =
         M().AllocateEntry(OpType::PUT_END, "key", "payload-data");
 
-    ErrorCode err = M().PersistEntryToEtcd(entry);
+    ErrorCode err = M().PersistEntry(entry);
     EXPECT_EQ(ErrorCode::ETCD_OPERATION_ERROR, err);
 }
 
@@ -198,7 +198,7 @@ TEST_F(OpLogManagerTest, TestWriteToEtcd_Success) {
 TEST_F(OpLogManagerTest, TestWriteToEtcd_Failure) {
     OpLogEntry entry =
         M().AllocateEntry(OpType::PUT_END, "key", "payload-data");
-    ErrorCode err = M().PersistEntryToEtcd(entry);
+    ErrorCode err = M().PersistEntry(entry);
     EXPECT_EQ(ErrorCode::ETCD_OPERATION_ERROR, err);
 }
 
