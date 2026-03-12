@@ -136,6 +136,34 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
     std::string key = BuildOpLogKey(entry.sequence_id);
     std::string value = mooncake::SerializeOpLogEntry(entry);
 
+    // Fencing check: if this sequence_id was already persisted, verify
+    // that the existing value matches (idempotent retry) rather than
+    // silently returning OK via the batch wait short-circuit.
+    if (last_persisted_seq_id_.load() >= entry.sequence_id) {
+        ErrorCode create_err =
+            EtcdHelper::Create(key.c_str(), key.size(),
+                               value.c_str(), value.size());
+        if (create_err == ErrorCode::OK) {
+            // Key didn't exist yet — written successfully.
+            return ErrorCode::OK;
+        }
+        if (create_err == ErrorCode::ETCD_TRANSACTION_FAIL) {
+            // Key already exists — check for idempotency vs fencing.
+            std::string existing_value;
+            EtcdRevisionId rev;
+            ErrorCode get_err = EtcdHelper::Get(
+                key.c_str(), key.size(), existing_value, rev);
+            if (get_err == ErrorCode::OK && existing_value == value) {
+                return ErrorCode::OK;  // Idempotent retry
+            }
+            LOG(ERROR) << "Fencing violation in WriteOpLog: seq="
+                       << entry.sequence_id
+                       << " already persisted with different value";
+            return ErrorCode::ETCD_OPERATION_ERROR;
+        }
+        return create_err;
+    }
+
     {
         std::unique_lock<std::mutex> lock(batch_mutex_);
         pending_batch_.push_back({std::move(key), std::move(value), entry.sequence_id, sync});
@@ -249,20 +277,39 @@ void EtcdOpLogStore::FlushBatch() {
             // BatchCreate uses Txn(If all keys CreateRevision==0).
             // Transaction failure means some keys already exist — likely
             // from a previous attempt that timed out but actually succeeded
-            // on the etcd side.  Since OpLog entries are idempotent (same
-            // sequence_id → same key/value), we can safely fall back to
-            // individual Put (overwrite) for the remaining keys.
+            // on the etcd side.  Fall back to per-key Create with
+            // idempotency check to preserve fencing semantics.
             LOG(WARNING)
                 << "BatchCreate transaction failed (keys already exist), "
-                << "falling back to per-key Put for " << keys.size()
+                << "falling back to per-key Create for " << keys.size()
                 << " entries";
             bool all_ok = true;
             for (size_t j = 0; j < keys.size(); ++j) {
-                ErrorCode put_err =
-                    EtcdHelper::Put(keys[j].c_str(), keys[j].size(),
-                                    values[j].c_str(), values[j].size());
-                if (put_err != ErrorCode::OK) {
-                    LOG(ERROR) << "Fallback Put failed for key=" << keys[j];
+                ErrorCode create_err =
+                    EtcdHelper::Create(keys[j].c_str(), keys[j].size(),
+                                       values[j].c_str(), values[j].size());
+                if (create_err == ErrorCode::OK) {
+                    continue;
+                }
+                if (create_err == ErrorCode::ETCD_TRANSACTION_FAIL) {
+                    // Key already exists — check if value matches (idempotent
+                    // retry) or differs (fencing violation).
+                    std::string existing_value;
+                    EtcdRevisionId rev;
+                    ErrorCode get_err = EtcdHelper::Get(
+                        keys[j].c_str(), keys[j].size(), existing_value, rev);
+                    if (get_err == ErrorCode::OK &&
+                        existing_value == values[j]) {
+                        // Idempotent: same content already written.
+                        continue;
+                    }
+                    LOG(ERROR)
+                        << "Fencing violation: key=" << keys[j]
+                        << " already exists with different value";
+                    all_ok = false;
+                } else {
+                    LOG(ERROR) << "Fallback Create failed for key="
+                               << keys[j] << ", err=" << create_err;
                     all_ok = false;
                 }
             }
