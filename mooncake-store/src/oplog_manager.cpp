@@ -130,10 +130,10 @@ size_t OpLogManager::GetEntryCount() const {
 
 ErrorCode OpLogManager::CleanupOpLogBefore(uint64_t before_sequence_id) {
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    if (!etcd_oplog_store_) {
+    if (!oplog_store_) {
         return ErrorCode::OK;
     }
-    return etcd_oplog_store_->CleanupOpLogBefore(before_sequence_id);
+    return oplog_store_->CleanupOpLogBefore(before_sequence_id);
 }
 
 uint64_t OpLogManager::NowMs() {

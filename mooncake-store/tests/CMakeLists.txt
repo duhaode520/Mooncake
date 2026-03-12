@@ -19,6 +19,27 @@ function(add_store_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+function(add_hot_standby_ut_test name)
+    add_executable(${name} ${ARGN})
+    target_include_directories(${name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_BINARY_DIR}/../include
+    )
+    target_link_libraries(${name} PUBLIC
+        mooncake_store
+        transfer_engine
+        cachelib_memory_allocator
+        ${ETCD_WRAPPER_LIB}
+        glog
+        gflags
+        ibverbs
+        gtest
+        gtest_main
+        pthread
+    )
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
 add_store_test(buffer_allocator_test buffer_allocator_test.cpp)
 add_store_test(allocation_strategy_test allocation_strategy_test.cpp)
 add_store_test(eviction_strategy_test eviction_strategy_test.cpp)

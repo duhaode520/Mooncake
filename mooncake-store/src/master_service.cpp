@@ -17,7 +17,7 @@
 
 #include "allocator.h"
 #include "etcd_helper.h"
-#include "etcd_oplog_store.h"
+#include "oplog_store_factory.h"
 #include "ha_metric_manager.h"
 #include "master_metric_manager.h"
 #include "metadata_store.h"  // For MetadataPayload
@@ -278,35 +278,31 @@ MasterService::MasterService(const MasterServiceConfig& config)
             }
         }
     }
-    // Initialize EtcdOpLogStore if HA is enabled
-    // Note: This requires STORE_USE_ETCD to be enabled at compile time
-    // Note: etcd connection should be established before MasterService construction
-    // (e.g., in MasterServiceSupervisor), so we can use the existing connection
+    // Initialize OpLogStore if HA is enabled.
+    // Uses OpLogStoreFactory to decouple from concrete EtcdOpLogStore.
 #ifdef STORE_USE_ETCD
     if (enable_ha_ && !cluster_id_.empty()) {
-        // Try to create EtcdOpLogStore - if etcd is not connected, operations will fail
-        // but we can still use memory buffer as fallback
-        // Writer: enable batch update for `/latest` to reduce etcd write pressure,
-        // and enable batch write so that OpLogManager can persist entries to etcd.
-        auto etcd_oplog_store =
-            std::make_shared<EtcdOpLogStore>(cluster_id_,
-                                             /*enable_latest_seq_batch_update=*/true,
-                                             /*enable_batch_write=*/true);
-        if (etcd_oplog_store->Init() != ErrorCode::OK) {
-            LOG(WARNING) << "EtcdOpLogStore::Init() failed for cluster_id="
+        auto oplog_store = OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::WRITER);
+        if (!oplog_store) {
+            LOG(WARNING) << "OpLogStore creation failed for cluster_id="
                          << cluster_id_
                          << ", OpLog will fall back to memory buffer";
+        } else {
+            // Fence against restart/promotion regressions: initialize
+            // OpLogManager to the maximum existing sequence_id so we
+            // don't collide/overwrite.
+            uint64_t max_seq = 0;
+            if (oplog_store->GetMaxSequenceId(max_seq) == ErrorCode::OK) {
+                oplog_manager_.SetInitialSequenceId(max_seq);
+            }
+            oplog_manager_.SetOpLogStore(
+                std::shared_ptr<OpLogStore>(std::move(oplog_store)));
+            LOG(INFO) << "OpLogStore initialized for cluster_id="
+                      << cluster_id_
+                      << " (etcd connection should be established "
+                      << "before MasterService construction)";
         }
-        oplog_manager_.SetEtcdOpLogStore(etcd_oplog_store);
-        // Fence against restart/promotion regressions: initialize OpLogManager
-        // to the maximum existing sequence_id in etcd so we don't collide/overwrite.
-        uint64_t max_seq = 0;
-        if (etcd_oplog_store->GetMaxSequenceId(max_seq) == ErrorCode::OK) {
-            oplog_manager_.SetInitialSequenceId(max_seq);
-        }
-        LOG(INFO) << "EtcdOpLogStore initialized for cluster_id="
-                  << cluster_id_ << " (etcd connection should be established "
-                  << "before MasterService construction)";
     } else if (enable_ha_) {
         LOG(WARNING) << "HA mode enabled but cluster_id is empty, "
                         "OpLog will only be stored in memory buffer";
@@ -374,10 +370,13 @@ void MasterService::RestoreFromStandbySnapshot(
     uint64_t start_seq = initial_oplog_sequence_id;
 #ifdef STORE_USE_ETCD
     if (enable_ha_ && !cluster_id_.empty()) {
-        EtcdOpLogStore store(cluster_id_, /*enable_latest_seq_batch_update=*/false);
-        uint64_t max_seq = 0;
-        if (store.GetMaxSequenceId(max_seq) == ErrorCode::OK) {
-            start_seq = std::max(start_seq, max_seq);
+        auto store = OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::READER);
+        if (store) {
+            uint64_t max_seq = 0;
+            if (store->GetMaxSequenceId(max_seq) == ErrorCode::OK) {
+                start_seq = std::max(start_seq, max_seq);
+            }
         }
     }
 #endif
@@ -551,7 +550,7 @@ ErrorCode MasterService::PersistOpLogEntryWithSyncRetries(
     auto start_time = std::chrono::steady_clock::now();
     
     for (int attempt = 0; attempt < kSyncRetries; ++attempt) {
-        persist_err = oplog_manager_.PersistEntryToEtcd(entry);
+        persist_err = oplog_manager_.PersistEntry(entry);
         if (persist_err == ErrorCode::OK) {
             break;
         }
@@ -686,7 +685,7 @@ bool MasterService::ProcessPendingMutationOnce(PendingMutation& m) {
         return true;
     }
 
-    ErrorCode err = oplog_manager_.PersistEntryToEtcd(m.oplog_entry);
+    ErrorCode err = oplog_manager_.PersistEntry(m.oplog_entry);
     if (err != ErrorCode::OK) {
         return false;
     }

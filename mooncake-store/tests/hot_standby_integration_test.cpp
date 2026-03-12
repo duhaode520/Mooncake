@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "etcd_helper.h"
-#include "etcd_oplog_store.h"
+#include "oplog_store_factory.h"
 #include "ha_helper.h"
 #include "ha_metric_manager.h"
 #include "hot_standby_service.h"
@@ -168,8 +168,9 @@ TEST_F(HotStandbyIntegrationTest, TestPrimaryStandbySync) {
 
     // 1. Simulate primary writing OpLog entries to etcd
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     // Write several test entries
     std::vector<std::string> test_keys;
@@ -270,8 +271,9 @@ TEST_F(HotStandbyIntegrationTest, TestStandbyPromotion) {
 
     // 1. Write several OpLog entries
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     std::vector<std::string> test_keys;
     for (int i = 0; i < 5; ++i) {
@@ -348,8 +350,9 @@ TEST_F(HotStandbyIntegrationTest, TestFailoverScenario) {
 
     // 1. Simulate primary writing data
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     std::vector<std::string> test_keys;
     for (int i = 0; i < 10; ++i) {
@@ -422,8 +425,9 @@ TEST_F(HotStandbyIntegrationTest, TestDataConsistency) {
 
     // 1. Simulate primary writing mixed operations
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     std::map<std::string, bool> expected_keys;  // key -> should_exist
 
@@ -521,8 +525,9 @@ TEST_F(HotStandbyIntegrationTest, TestMultipleStandbys) {
 
     // 1. Simulate primary writing data
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     std::vector<std::string> test_keys;
     for (int i = 0; i < 10; ++i) {
@@ -734,8 +739,9 @@ TEST_F(HotStandbyIntegrationTest, TestHighThroughputSync) {
 
     // 2. Simulate high-throughput writes on the primary
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     const int num_writes = 100;
     std::string payload =
@@ -817,8 +823,9 @@ TEST_F(HotStandbyIntegrationTest, TestLargePayloadSync) {
 
     // 2. Write an entry with payload close to the maximum size
     OpLogManager primary_oplog;
-    primary_oplog.SetEtcdOpLogStore(
-        std::make_shared<EtcdOpLogStore>(FLAGS_hs_cluster_id, true));
+    primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
+        OpLogStoreFactory::Create(
+            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
 
     // Create a JSON payload close to but not exceeding the logical max payload size.
     // Note: etcd has a default max request size limit for the entire request
