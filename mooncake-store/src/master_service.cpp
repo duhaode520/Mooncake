@@ -282,6 +282,8 @@ MasterService::MasterService(const MasterServiceConfig& config)
     // Uses OpLogStoreFactory to decouple from concrete EtcdOpLogStore.
 #ifdef STORE_USE_ETCD
     if (enable_ha_ && !cluster_id_.empty()) {
+        // Try to create OpLogStore - if backend is not connected, operations
+        // will fail but we can still use memory buffer as fallback.
         auto oplog_store = OpLogStoreFactory::Create(
             OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::WRITER);
         if (!oplog_store) {
