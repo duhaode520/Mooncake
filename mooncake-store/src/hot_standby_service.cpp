@@ -298,9 +298,12 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
         LOG(ERROR) << "Failed to start OpLogReplicator after "
                    << kMaxStartRetries
                    << " attempts, aborting Start()";
-        state_machine_.ProcessEvent(StandbyEvent::FATAL_ERROR);
+        state_machine_.ProcessEvent(StandbyEvent::SYNC_FAILED);
         return ErrorCode::INTERNAL_ERROR;
     }
+
+    // Transition to WATCHING state after successful sync
+    state_machine_.ProcessEvent(StandbyEvent::SYNC_COMPLETE);
 
     // Start background threads
     replication_thread_ = std::thread(&HotStandbyService::ReplicationLoop, this);
