@@ -407,12 +407,6 @@ ErrorCode EtcdHelper::CreateWithLease(const char* key, const size_t key_size,
 
 ErrorCode EtcdHelper::BatchCreate(const std::vector<std::string>& keys,
                                   const std::vector<std::string>& values) {
-    LOG(FATAL) << "Etcd is not enabled in compilation";
-    return ErrorCode::ETCD_OPERATION_ERROR;
-}
-
-ErrorCode EtcdHelper::BatchCreate(const std::vector<std::string>& keys,
-                                  const std::vector<std::string>& values) {
     (void)keys;
     (void)values;
     LOG(FATAL) << "Etcd is not enabled in compilation";

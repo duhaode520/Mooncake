@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 #include "oplog_store.h"
@@ -17,33 +16,40 @@ enum class OpLogStoreRole {
 
 enum class OpLogStoreType {
     ETCD,
-    // Future: HDFS, S3, LOCAL_FS, ...
+    LOCAL_FS,
 };
 
-// Convert string to OpLogStoreType (case-insensitive)
+// Parse string to OpLogStoreType (case-insensitive).
+// Returns ETCD as default for unrecognized strings.
 inline OpLogStoreType ParseOpLogStoreType(const std::string& type_str) {
-    auto lower = type_str;
+    std::string lower = type_str;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-    if (lower == "etcd") {
-        return OpLogStoreType::ETCD;
+    if (lower == "localfs" || lower == "local_fs") {
+        return OpLogStoreType::LOCAL_FS;
     }
-    throw std::invalid_argument("Unknown OpLogStoreType: " + type_str);
+    return OpLogStoreType::ETCD;
 }
 
 inline std::string OpLogStoreTypeToString(OpLogStoreType type) {
     switch (type) {
+        case OpLogStoreType::LOCAL_FS:
+            return "localfs";
         case OpLogStoreType::ETCD:
-            return "etcd";
         default:
-            return "unknown";
+            return "etcd";
     }
 }
 
+// Default configuration values for LocalFS OpLog store
+static constexpr const char* kDefaultOpLogRootDir = "/tmp/mooncake_oplog";
+static constexpr int kDefaultOpLogPollIntervalMs = 1000;
+
 class OpLogStoreFactory {
    public:
-    static std::unique_ptr<OpLogStore> Create(OpLogStoreType type,
-                                              const std::string& cluster_id,
-                                              OpLogStoreRole role);
+    static std::unique_ptr<OpLogStore> Create(
+        OpLogStoreType type, const std::string& cluster_id, OpLogStoreRole role,
+        const std::string& oplog_root_dir = kDefaultOpLogRootDir,
+        int poll_interval_ms = kDefaultOpLogPollIntervalMs);
 };
 
 }  // namespace mooncake

@@ -286,7 +286,8 @@ MasterService::MasterService(const MasterServiceConfig& config)
         // Try to create OpLogStore - if backend is not connected, operations
         // will fail but we can still use memory buffer as fallback.
         auto oplog_store = OpLogStoreFactory::Create(
-            oplog_store_type_, cluster_id_, OpLogStoreRole::WRITER);
+            oplog_store_type_, cluster_id_, OpLogStoreRole::WRITER,
+            config_.oplog_store_root_dir, config_.oplog_poll_interval_ms);
         if (!oplog_store) {
             LOG(WARNING) << "OpLogStore creation failed for cluster_id="
                          << cluster_id_
@@ -374,7 +375,8 @@ void MasterService::RestoreFromStandbySnapshot(
 #ifdef STORE_USE_ETCD
     if (enable_ha_ && !cluster_id_.empty()) {
         auto store = OpLogStoreFactory::Create(
-            oplog_store_type_, cluster_id_, OpLogStoreRole::READER);
+            oplog_store_type_, cluster_id_, OpLogStoreRole::READER,
+            config_.oplog_store_root_dir, config_.oplog_poll_interval_ms);
         if (store) {
             uint64_t max_seq = 0;
             if (store->GetMaxSequenceId(max_seq) == ErrorCode::OK) {

@@ -323,6 +323,8 @@ void MasterServiceSupervisor::StartStandbyService(MasterViewHelper& mv_helper,
     //   OpLog from snapshot_sequence_id.
     standby_config.enable_snapshot_bootstrap = true;
     standby_config.oplog_store_type = config_.oplog_store_type;
+    standby_config.oplog_store_root_dir = config_.oplog_store_root_dir;
+    standby_config.oplog_poll_interval_ms = config_.oplog_poll_interval_ms;
     LOG(INFO) << "Standby snapshot bootstrap: "
               << (standby_config.enable_snapshot_bootstrap ? "enabled" : "disabled")
               << ", snapshot_backend=etcd"

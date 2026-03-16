@@ -32,6 +32,11 @@ struct MasterConfig {
     std::string etcd_endpoints;
 
     std::string cluster_id;
+
+    // OpLog store configuration
+    std::string oplog_store_type;  // "etcd" or "localfs"
+    std::string oplog_store_root_dir;  // LocalFS OpLogStore root directory
+    int oplog_poll_interval_ms;        // Polling interval for ChangeNotifier
     std::string root_fs_dir;
     int64_t global_file_segment_size;
     std::string memory_allocator;
@@ -57,8 +62,6 @@ struct MasterConfig {
 
     // Snapshot storage backend type: "local" or "s3", default "local"
     std::string snapshot_backend_type;
-    // OpLog storage backend type: "etcd" (default)
-    std::string oplog_store_type;
     // Task manager configuration
     uint32_t max_total_finished_tasks;
     uint32_t max_total_pending_tasks;
@@ -115,7 +118,11 @@ class MasterServiceSupervisorConfig {
     uint64_t snapshot_child_timeout_seconds =
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     SnapshotBackendType snapshot_backend_type = SnapshotBackendType::LOCAL_FILE;
+
+    // OpLog store configuration
     OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
+    std::string oplog_store_root_dir = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
 
     MasterServiceSupervisorConfig() = default;
 
@@ -179,7 +186,12 @@ class MasterServiceSupervisorConfig {
         max_total_processing_tasks = config.max_total_processing_tasks;
         pending_task_timeout_sec = config.pending_task_timeout_sec;
         processing_task_timeout_sec = config.processing_task_timeout_sec;
+
         oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
+        oplog_store_root_dir = config.oplog_store_root_dir.empty()
+                                   ? kDefaultOpLogRootDir
+                                   : config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
 
         validate();
     }
@@ -259,7 +271,6 @@ class WrappedMasterServiceConfig {
     uint64_t snapshot_child_timeout_seconds =
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     SnapshotBackendType snapshot_backend_type = SnapshotBackendType::LOCAL_FILE;
-    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
     uint32_t max_total_finished_tasks = DEFAULT_MAX_TOTAL_FINISHED_TASKS;
     uint32_t max_total_pending_tasks = DEFAULT_MAX_TOTAL_PENDING_TASKS;
     uint32_t max_total_processing_tasks = DEFAULT_MAX_TOTAL_PROCESSING_TASKS;
@@ -269,6 +280,11 @@ class WrappedMasterServiceConfig {
         DEFAULT_PROCESSING_TASK_TIMEOUT_SEC;  // 0 = no timeout(infinite)
 
     std::string etcd_endpoints = "0.0.0.0:2379";
+
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
+    std::string oplog_store_root_dir = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
 
     WrappedMasterServiceConfig() = default;
 
@@ -316,12 +332,17 @@ class WrappedMasterServiceConfig {
         snapshot_backend_type =
             ParseSnapshotBackendType(config.snapshot_backend_type);
         etcd_endpoints = config.etcd_endpoints;
-        oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;
         pending_task_timeout_sec = config.pending_task_timeout_sec;
         processing_task_timeout_sec = config.processing_task_timeout_sec;
+
+        oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
+        oplog_store_root_dir = config.oplog_store_root_dir.empty()
+                                   ? kDefaultOpLogRootDir
+                                   : config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 
     // From MasterServiceSupervisorConfig, enable_ha is set to true
@@ -368,12 +389,15 @@ class WrappedMasterServiceConfig {
         // HA mode policy: force ETCD snapshot backend.
         snapshot_backend_type = SnapshotBackendType::ETCD;
         etcd_endpoints = config.etcd_endpoints;
-        oplog_store_type = config.oplog_store_type;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;
         pending_task_timeout_sec = config.pending_task_timeout_sec;
         processing_task_timeout_sec = config.processing_task_timeout_sec;
+
+        oplog_store_type = config.oplog_store_type;
+        oplog_store_root_dir = config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 };
 
@@ -411,13 +435,17 @@ class MasterServiceConfigBuilder {
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     SnapshotBackendType snapshot_backend_type_ =
         SnapshotBackendType::LOCAL_FILE;
-    OpLogStoreType oplog_store_type_ = OpLogStoreType::ETCD;
     std::string etcd_endpoints_ = "0.0.0.0:2379";
     uint32_t max_total_finished_tasks_ = DEFAULT_MAX_TOTAL_FINISHED_TASKS;
     uint32_t max_total_pending_tasks_ = DEFAULT_MAX_TOTAL_PENDING_TASKS;
     uint32_t max_total_processing_tasks_ = DEFAULT_MAX_TOTAL_PROCESSING_TASKS;
     uint64_t pending_task_timeout_sec_ = DEFAULT_PENDING_TASK_TIMEOUT_SEC;
     uint64_t processing_task_timeout_sec_ = DEFAULT_PROCESSING_TASK_TIMEOUT_SEC;
+
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type_ = OpLogStoreType::ETCD;
+    std::string oplog_store_root_dir_ = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms_ = kDefaultOpLogPollIntervalMs;
 
    public:
     MasterServiceConfigBuilder() = default;
@@ -542,10 +570,6 @@ class MasterServiceConfigBuilder {
         snapshot_backend_type_ = type;
         return *this;
     }
-    MasterServiceConfigBuilder& set_oplog_store_type(OpLogStoreType type) {
-        oplog_store_type_ = type;
-        return *this;
-    }
     MasterServiceConfigBuilder& set_max_total_finished_tasks(
         uint32_t max_total_finished_tasks) {
         max_total_finished_tasks_ = max_total_finished_tasks;
@@ -576,6 +600,22 @@ class MasterServiceConfigBuilder {
     MasterServiceConfigBuilder& set_etcd_endpoints(
         const std::string& endpoints) {
         etcd_endpoints_ = endpoints;
+        return *this;
+    }
+
+    MasterServiceConfigBuilder& set_oplog_store_type(OpLogStoreType type) {
+        oplog_store_type_ = type;
+        return *this;
+    }
+
+    MasterServiceConfigBuilder& set_oplog_store_root_dir(
+        const std::string& dir) {
+        oplog_store_root_dir_ = dir;
+        return *this;
+    }
+
+    MasterServiceConfigBuilder& set_oplog_poll_interval_ms(int ms) {
+        oplog_poll_interval_ms_ = ms;
         return *this;
     }
 
@@ -621,7 +661,6 @@ class MasterServiceConfig {
     uint64_t snapshot_child_timeout_seconds =
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     SnapshotBackendType snapshot_backend_type = SnapshotBackendType::LOCAL_FILE;
-    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
     std::string etcd_endpoints = "0.0.0.0:2379";
     TaskManagerConfig task_manager_config = {
         .max_total_finished_tasks = DEFAULT_MAX_TOTAL_FINISHED_TASKS,
@@ -630,6 +669,11 @@ class MasterServiceConfig {
         .pending_task_timeout_sec = DEFAULT_PENDING_TASK_TIMEOUT_SEC,
         .processing_task_timeout_sec = DEFAULT_PROCESSING_TASK_TIMEOUT_SEC,
     };
+
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
+    std::string oplog_store_root_dir = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
 
     MasterServiceConfig() = default;
 
@@ -662,7 +706,6 @@ class MasterServiceConfig {
         snapshot_interval_seconds = config.snapshot_interval_seconds;
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
         snapshot_backend_type = config.snapshot_backend_type;
-        oplog_store_type = config.oplog_store_type;
         etcd_endpoints = config.etcd_endpoints;
         task_manager_config.max_total_finished_tasks =
             config.max_total_finished_tasks;
@@ -674,6 +717,10 @@ class MasterServiceConfig {
             config.pending_task_timeout_sec;
         task_manager_config.processing_task_timeout_sec =
             config.processing_task_timeout_sec;
+
+        oplog_store_type = config.oplog_store_type;
+        oplog_store_root_dir = config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 
     // Static factory method to create a builder
@@ -708,7 +755,6 @@ inline MasterServiceConfig MasterServiceConfigBuilder::build() const {
     config.snapshot_interval_seconds = snapshot_interval_seconds_;
     config.snapshot_child_timeout_seconds = snapshot_child_timeout_seconds_;
     config.snapshot_backend_type = snapshot_backend_type_;
-    config.oplog_store_type = oplog_store_type_;
     config.etcd_endpoints = etcd_endpoints_;
     config.task_manager_config.max_total_finished_tasks =
         max_total_finished_tasks_;
@@ -720,6 +766,9 @@ inline MasterServiceConfig MasterServiceConfigBuilder::build() const {
         pending_task_timeout_sec_;
     config.task_manager_config.processing_task_timeout_sec =
         processing_task_timeout_sec_;
+    config.oplog_store_type = oplog_store_type_;
+    config.oplog_store_root_dir = oplog_store_root_dir_;
+    config.oplog_poll_interval_ms = oplog_poll_interval_ms_;
     return config;
 }
 

@@ -9,7 +9,8 @@
 namespace mooncake {
 
 std::unique_ptr<OpLogStore> OpLogStoreFactory::Create(
-    OpLogStoreType type, const std::string& cluster_id, OpLogStoreRole role) {
+    OpLogStoreType type, const std::string& cluster_id, OpLogStoreRole role,
+    const std::string& oplog_root_dir, int poll_interval_ms) {
     switch (type) {
         case OpLogStoreType::ETCD: {
 #ifdef STORE_USE_ETCD
@@ -28,6 +29,12 @@ std::unique_ptr<OpLogStore> OpLogStoreFactory::Create(
             LOG(ERROR) << "OpLogStoreFactory: ETCD support not compiled in";
             return nullptr;
 #endif
+        }
+        case OpLogStoreType::LOCAL_FS: {
+            LOG(ERROR) << "OpLogStoreFactory: LOCAL_FS not yet implemented";
+            (void)oplog_root_dir;
+            (void)poll_interval_ms;
+            return nullptr;
         }
         default:
             LOG(ERROR) << "OpLogStoreFactory: unknown store type";
