@@ -322,6 +322,7 @@ void MasterServiceSupervisor::StartStandbyService(MasterViewHelper& mv_helper,
     // - Standby nodes should always *try* snapshot bootstrap first, then replay
     //   OpLog from snapshot_sequence_id.
     standby_config.enable_snapshot_bootstrap = true;
+    standby_config.oplog_store_type = config_.oplog_store_type;
     LOG(INFO) << "Standby snapshot bootstrap: "
               << (standby_config.enable_snapshot_bootstrap ? "enabled" : "disabled")
               << ", snapshot_backend=etcd"

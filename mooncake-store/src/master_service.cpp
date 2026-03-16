@@ -194,6 +194,7 @@ MasterService::MasterService(const MasterServiceConfig& config)
       enable_ha_(config.enable_ha),
       enable_offload_(config.enable_offload),
       cluster_id_(config.cluster_id),
+      oplog_store_type_(config.oplog_store_type),
       root_fs_dir_(config.root_fs_dir),
       global_file_segment_size_(config.global_file_segment_size),
       enable_disk_eviction_(config.enable_disk_eviction),
@@ -285,7 +286,7 @@ MasterService::MasterService(const MasterServiceConfig& config)
         // Try to create OpLogStore - if backend is not connected, operations
         // will fail but we can still use memory buffer as fallback.
         auto oplog_store = OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::WRITER);
+            oplog_store_type_, cluster_id_, OpLogStoreRole::WRITER);
         if (!oplog_store) {
             LOG(WARNING) << "OpLogStore creation failed for cluster_id="
                          << cluster_id_
@@ -373,7 +374,7 @@ void MasterService::RestoreFromStandbySnapshot(
 #ifdef STORE_USE_ETCD
     if (enable_ha_ && !cluster_id_.empty()) {
         auto store = OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, cluster_id_, OpLogStoreRole::READER);
+            oplog_store_type_, cluster_id_, OpLogStoreRole::READER);
         if (store) {
             uint64_t max_seq = 0;
             if (store->GetMaxSequenceId(max_seq) == ErrorCode::OK) {
