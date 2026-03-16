@@ -365,5 +365,100 @@ TEST_F(LocalFsOpLogStoreTest, CleanupEmptyDir) {
     EXPECT_EQ(ErrorCode::OK, store->CleanupOpLogBefore(100));
 }
 
+// --- ChangeNotifier tests ---
+
+TEST_F(LocalFsOpLogStoreTest, ChangeNotifierBasic) {
+    auto writer = CreateWriter();
+    auto reader = CreateReader();
+
+    auto notifier = reader->CreateChangeNotifier(cluster_id_);
+    ASSERT_NE(nullptr, notifier);
+
+    std::vector<OpLogEntry> received;
+    std::mutex received_mutex;
+    std::condition_variable received_cv;
+
+    auto on_entry = [&](const OpLogEntry& entry) {
+        std::lock_guard<std::mutex> lock(received_mutex);
+        received.push_back(entry);
+        received_cv.notify_one();
+    };
+    auto on_error = [](ErrorCode) {};
+
+    EXPECT_EQ(ErrorCode::OK, notifier->Start(0, on_entry, on_error));
+    EXPECT_TRUE(notifier->IsHealthy());
+
+    // Write an entry from writer
+    writer->WriteOpLog(MakeEntry(1), /*sync=*/true);
+
+    // Wait for notifier to deliver it (with timeout)
+    {
+        std::unique_lock<std::mutex> lock(received_mutex);
+        EXPECT_TRUE(received_cv.wait_for(lock, std::chrono::seconds(5),
+                                          [&] { return received.size() >= 1; }));
+    }
+    EXPECT_EQ(1, received.size());
+    EXPECT_EQ(1, received[0].sequence_id);
+
+    notifier->Stop();
+}
+
+TEST_F(LocalFsOpLogStoreTest, ChangeNotifierCatchUp) {
+    auto writer = CreateWriter();
+    // Write entries BEFORE starting notifier
+    for (uint64_t i = 1; i <= 5; i++) {
+        writer->WriteOpLog(MakeEntry(i), /*sync=*/(i == 5));
+    }
+
+    auto reader = CreateReader();
+    auto notifier = reader->CreateChangeNotifier(cluster_id_);
+    ASSERT_NE(nullptr, notifier);
+
+    std::vector<OpLogEntry> received;
+    std::mutex received_mutex;
+    std::condition_variable received_cv;
+
+    auto on_entry = [&](const OpLogEntry& entry) {
+        std::lock_guard<std::mutex> lock(received_mutex);
+        received.push_back(entry);
+        received_cv.notify_one();
+    };
+    auto on_error = [](ErrorCode) {};
+
+    // Start from 0 should catch up with existing entries
+    EXPECT_EQ(ErrorCode::OK, notifier->Start(0, on_entry, on_error));
+
+    {
+        std::unique_lock<std::mutex> lock(received_mutex);
+        EXPECT_TRUE(received_cv.wait_for(lock, std::chrono::seconds(5),
+                                          [&] { return received.size() >= 5; }));
+    }
+    EXPECT_EQ(5, received.size());
+    EXPECT_EQ(1, received[0].sequence_id);
+    EXPECT_EQ(5, received[4].sequence_id);
+
+    notifier->Stop();
+}
+
+TEST_F(LocalFsOpLogStoreTest, ChangeNotifierStopNoMoreCallbacks) {
+    auto writer = CreateWriter();
+    auto reader = CreateReader();
+
+    auto notifier = reader->CreateChangeNotifier(cluster_id_);
+    ASSERT_NE(nullptr, notifier);
+
+    std::atomic<int> callback_count{0};
+    auto on_entry = [&](const OpLogEntry&) { callback_count++; };
+    auto on_error = [](ErrorCode) {};
+
+    EXPECT_EQ(ErrorCode::OK, notifier->Start(0, on_entry, on_error));
+    notifier->Stop();
+
+    // Write after stop - should not trigger callback
+    writer->WriteOpLog(MakeEntry(1), /*sync=*/true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(0, callback_count.load());
+}
+
 }  // namespace
 }  // namespace mooncake

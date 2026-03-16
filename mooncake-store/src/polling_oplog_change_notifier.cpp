@@ -1,7 +1,6 @@
-// mooncake-store/src/polling_oplog_change_notifier.cpp
-// Placeholder - will be implemented in Task 8
-
 #include "polling_oplog_change_notifier.h"
+
+#include <glog/logging.h>
 
 namespace mooncake {
 
@@ -11,16 +10,65 @@ PollingOpLogChangeNotifier::PollingOpLogChangeNotifier(OpLogStore* store,
 
 PollingOpLogChangeNotifier::~PollingOpLogChangeNotifier() { Stop(); }
 
-ErrorCode PollingOpLogChangeNotifier::Start(uint64_t /*start_sequence_id*/,
-                                            EntryCallback /*on_entry*/,
-                                            ErrorCallback /*on_error*/) {
-    return ErrorCode::INTERNAL_ERROR;  // Not yet implemented
+ErrorCode PollingOpLogChangeNotifier::Start(uint64_t start_sequence_id,
+                                            EntryCallback on_entry,
+                                            ErrorCallback on_error) {
+    if (running_.load()) {
+        return ErrorCode::INTERNAL_ERROR;
+    }
+
+    on_entry_ = std::move(on_entry);
+    on_error_ = std::move(on_error);
+    last_sequence_id_.store(start_sequence_id);
+    running_.store(true);
+    healthy_.store(true);
+    poll_thread_ = std::thread(&PollingOpLogChangeNotifier::PollLoop, this);
+
+    return ErrorCode::OK;
 }
 
-void PollingOpLogChangeNotifier::Stop() {}
+void PollingOpLogChangeNotifier::Stop() {
+    running_.store(false);
+    if (poll_thread_.joinable()) {
+        poll_thread_.join();
+    }
+    healthy_.store(false);
+}
 
-bool PollingOpLogChangeNotifier::IsHealthy() const { return false; }
+bool PollingOpLogChangeNotifier::IsHealthy() const {
+    return running_.load() && healthy_.load();
+}
 
-void PollingOpLogChangeNotifier::PollLoop() {}
+void PollingOpLogChangeNotifier::PollLoop() {
+    while (running_.load()) {
+        uint64_t last_seq = last_sequence_id_.load();
+        std::vector<OpLogEntry> entries;
+        auto err = store_->ReadOpLogSince(last_seq, kPollBatchSize, entries);
+
+        if (err == ErrorCode::OK && !entries.empty()) {
+            for (const auto& entry : entries) {
+                if (!running_.load()) break;
+                on_entry_(entry);
+            }
+            last_sequence_id_.store(entries.back().sequence_id);
+            healthy_.store(true);
+        } else if (err != ErrorCode::OK) {
+            if (on_error_) {
+                on_error_(err);
+            }
+            healthy_.store(false);
+        }
+
+        // Sleep for poll interval, but check running_ more frequently
+        // to allow fast shutdown
+        int remaining_ms = poll_interval_ms_;
+        while (remaining_ms > 0 && running_.load()) {
+            int sleep_ms = std::min(remaining_ms, 50);
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(sleep_ms));
+            remaining_ms -= sleep_ms;
+        }
+    }
+}
 
 }  // namespace mooncake
