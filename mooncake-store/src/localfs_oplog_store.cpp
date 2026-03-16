@@ -377,7 +377,13 @@ ErrorCode LocalFsOpLogStore::ReadSegmentEntries(
 
 ErrorCode LocalFsOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
     if (!enable_batch_write_) {
+        LOG(ERROR) << "WriteOpLog called on READER instance";
         return ErrorCode::INVALID_PARAMS;
+    }
+
+    if (!batch_write_running_.load()) {
+        LOG(ERROR) << "WriteOpLog called after shutdown";
+        return ErrorCode::INTERNAL_ERROR;
     }
 
     // Idempotent: if already persisted, return OK
@@ -394,10 +400,8 @@ ErrorCode LocalFsOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
             {std::move(serialized), entry.sequence_id, sync});
     }
 
-    // Notify batch thread
-    if (sync || pending_batch_.size() >= kBatchCountLimit) {
-        cv_batch_updated_.notify_one();
-    }
+    // Always notify — spurious wakeup is cheap, data race is not
+    cv_batch_updated_.notify_one();
 
     if (sync) {
         // Wait for flush to complete
@@ -457,14 +461,12 @@ void LocalFsOpLogStore::FlushBatch() {
     }
 
     if (err != ErrorCode::OK) {
-        LOG(ERROR) << "FlushBatch: all retries failed, data may be lost";
-        // Put entries back
-        {
-            std::lock_guard<std::mutex> lock(batch_mutex_);
-            for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
-                pending_batch_.push_front(std::move(*it));
-            }
-        }
+        LOG(ERROR) << "FlushBatch: all retries failed, "
+                   << entries.size() << " entries lost (seq "
+                   << entries.front().sequence_id << " - "
+                   << entries.back().sequence_id << ")";
+        // Notify sync waiters so they don't block forever
+        cv_sync_completed_.notify_all();
         return;
     }
 
@@ -534,9 +536,10 @@ ErrorCode LocalFsOpLogStore::ReadOpLogSince(uint64_t start_sequence_id,
         std::vector<OpLogEntry> seg_entries;
         auto err = ReadSegmentEntries(filepath, seg_entries);
         if (err != ErrorCode::OK) {
-            LOG(WARNING) << "ReadOpLogSince: skipping corrupted segment "
-                         << it->filename;
-            continue;
+            LOG(ERROR) << "ReadOpLogSince: corrupted segment "
+                       << it->filename
+                       << ", aborting read to prevent oplog gaps";
+            return err;
         }
 
         for (auto& e : seg_entries) {
