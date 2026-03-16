@@ -40,6 +40,7 @@ const std::string& toString(ErrorCode errorCode) noexcept {
         {ErrorCode::ETCD_KEY_NOT_EXIST, "ETCD_KEY_NOT_EXIST"},
         {ErrorCode::ETCD_TRANSACTION_FAIL, "ETCD_TRANSACTION_FAIL"},
         {ErrorCode::ETCD_CTX_CANCELLED, "ETCD_CTX_CANCELLED"},
+        {ErrorCode::OPLOG_ENTRY_NOT_FOUND, "OPLOG_ENTRY_NOT_FOUND"},
         {ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS,
          "UNAVAILABLE_IN_CURRENT_STATUS"},
         {ErrorCode::UNAVAILABLE_IN_CURRENT_MODE, "UNAVAILABLE_IN_CURRENT_MODE"},

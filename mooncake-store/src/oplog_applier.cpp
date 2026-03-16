@@ -489,7 +489,7 @@ bool OpLogApplier::RequestMissingOpLog(uint64_t missing_seq_id) {
 
     OpLogEntry entry;
     ErrorCode err = oplog_store_->ReadOpLog(missing_seq_id, entry);
-    if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
+    if (err == ErrorCode::OPLOG_ENTRY_NOT_FOUND) {
         LOG(INFO) << "OpLogApplier: missing OpLog entry not found in store, "
                      "sequence_id="
                   << missing_seq_id;

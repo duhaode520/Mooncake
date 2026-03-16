@@ -233,9 +233,9 @@ TEST_F(EtcdOpLogStoreTest, TestGetLatestSequenceId) {
 TEST_F(EtcdOpLogStoreTest, TestGetMaxSequenceIdAndEmpty) {
     uint64_t max_seq = 0;
 
-    // Empty cluster: after cleanup, GetMaxSequenceId should return ETCD_KEY_NOT_EXIST
+    // Empty cluster: after cleanup, GetMaxSequenceId should return OPLOG_ENTRY_NOT_FOUND
     CleanupTestData();
-    EXPECT_EQ(ErrorCode::ETCD_KEY_NOT_EXIST, store_->GetMaxSequenceId(max_seq));
+    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND, store_->GetMaxSequenceId(max_seq));
 
     // After writing several entries, MaxSequenceId should equal the last entry's seq
     for (uint64_t i = 10; i <= 15; ++i) {
@@ -303,8 +303,8 @@ TEST_F(EtcdOpLogStoreTest, TestCleanupOpLogBeforeAndBoundary) {
     ASSERT_EQ(ErrorCode::OK, store_->CleanupOpLogBefore(3));
 
     OpLogEntry out;
-    EXPECT_EQ(ErrorCode::ETCD_KEY_NOT_EXIST, store_->ReadOpLog(1, out));
-    EXPECT_EQ(ErrorCode::ETCD_KEY_NOT_EXIST, store_->ReadOpLog(2, out));
+    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND, store_->ReadOpLog(1, out));
+    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND, store_->ReadOpLog(2, out));
 
     ASSERT_EQ(ErrorCode::OK, store_->ReadOpLog(3, out));
     EXPECT_EQ(3u, out.sequence_id);

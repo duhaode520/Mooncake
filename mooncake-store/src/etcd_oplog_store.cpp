@@ -373,6 +373,10 @@ ErrorCode EtcdOpLogStore::ReadOpLog(uint64_t sequence_id,
     EtcdRevisionId revision_id;
     ErrorCode err = EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
     if (err != ErrorCode::OK) {
+        // Translate etcd-specific "key not found" to the generic OpLogStore error.
+        if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
+            return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
+        }
         return err;
     }
 
@@ -507,6 +511,9 @@ ErrorCode EtcdOpLogStore::GetLatestSequenceId(uint64_t& sequence_id) {
     EtcdRevisionId revision_id;
     ErrorCode err = EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
     if (err != ErrorCode::OK) {
+        if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
+            return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
+        }
         return err;
     }
 
@@ -523,7 +530,7 @@ ErrorCode EtcdOpLogStore::GetLatestSequenceId(uint64_t& sequence_id) {
 ErrorCode EtcdOpLogStore::GetMaxSequenceId(uint64_t& sequence_id) {
     auto max_seq_opt = GetMaxSequenceIdInternal();
     if (!max_seq_opt.has_value()) {
-        return ErrorCode::ETCD_KEY_NOT_EXIST;
+        return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
     }
     sequence_id = max_seq_opt.value();
     return ErrorCode::OK;
@@ -549,6 +556,9 @@ ErrorCode EtcdOpLogStore::GetSnapshotSequenceId(
     EtcdRevisionId revision_id;
     ErrorCode err = EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
     if (err != ErrorCode::OK) {
+        if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
+            return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
+        }
         return err;
     }
 

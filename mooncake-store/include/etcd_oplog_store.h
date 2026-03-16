@@ -90,14 +90,14 @@ class EtcdOpLogStore : public OpLogStore {
     /**
      * @brief Get the latest sequence_id from etcd.
      * @param sequence_id: Output param, the latest sequence_id.
-     * @return: Error code. ETCD_KEY_NOT_EXIST if no OpLog exists yet.
+     * @return: Error code. OPLOG_ENTRY_NOT_FOUND if no OpLog exists yet.
      */
     ErrorCode GetLatestSequenceId(uint64_t& sequence_id) override;
 
     // Stronger (than `/latest`) best-effort query: return the maximum existing
     // sequence_id by scanning etcd keys under /oplog/{cluster_id}/ with
     // descending key order.
-    // Return ETCD_KEY_NOT_EXIST if no OpLog exists yet.
+    // Return OPLOG_ENTRY_NOT_FOUND if no OpLog exists yet.
     ErrorCode GetMaxSequenceId(uint64_t& sequence_id) override;
 
     /**
@@ -120,7 +120,7 @@ class EtcdOpLogStore : public OpLogStore {
      * @brief Get the sequence_id for a given snapshot.
      * @param snapshot_id: The snapshot ID.
      * @param sequence_id: Output param, the sequence_id.
-     * @return: Error code. ETCD_KEY_NOT_EXIST if snapshot not found.
+     * @return: Error code. OPLOG_ENTRY_NOT_FOUND if snapshot not found.
      */
     ErrorCode GetSnapshotSequenceId(const std::string& snapshot_id,
                                     uint64_t& sequence_id) override;
