@@ -164,6 +164,17 @@ ErrorCode LocalFsOpLogStore::AtomicWriteFile(const std::string& target_path,
         return ErrorCode::INTERNAL_ERROR;
     }
 
+    // fsync parent directory to ensure the new directory entry is durable.
+    // Critical for DFS mounts where rename visibility is not guaranteed
+    // without an explicit directory sync.
+    std::string parent_dir =
+        fs::path(target_path).parent_path().string();
+    int dir_fd = ::open(parent_dir.c_str(), O_RDONLY | O_DIRECTORY);
+    if (dir_fd >= 0) {
+        ::fsync(dir_fd);
+        ::close(dir_fd);
+    }
+
     return ErrorCode::OK;
 }
 
