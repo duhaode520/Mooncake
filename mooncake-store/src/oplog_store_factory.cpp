@@ -6,6 +6,8 @@
 #include "etcd_oplog_store.h"
 #endif
 
+#include "localfs_oplog_store.h"
+
 namespace mooncake {
 
 std::unique_ptr<OpLogStore> OpLogStoreFactory::Create(
@@ -19,9 +21,8 @@ std::unique_ptr<OpLogStore> OpLogStoreFactory::Create(
             auto store = std::make_unique<EtcdOpLogStore>(
                 cluster_id, batch_update, batch_write);
             if (store->Init() != ErrorCode::OK) {
-                LOG(ERROR)
-                    << "OpLogStoreFactory: failed to init EtcdOpLogStore"
-                    << ", cluster_id=" << cluster_id;
+                LOG(ERROR) << "OpLogStoreFactory: failed to init EtcdOpLogStore"
+                           << ", cluster_id=" << cluster_id;
                 return nullptr;
             }
             return store;
@@ -31,10 +32,18 @@ std::unique_ptr<OpLogStore> OpLogStoreFactory::Create(
 #endif
         }
         case OpLogStoreType::LOCAL_FS: {
-            LOG(ERROR) << "OpLogStoreFactory: LOCAL_FS not yet implemented";
-            (void)oplog_root_dir;
-            (void)poll_interval_ms;
-            return nullptr;
+            bool enable_batch_write = (role == OpLogStoreRole::WRITER);
+            auto store = std::make_unique<LocalFsOpLogStore>(
+                cluster_id, oplog_root_dir, enable_batch_write,
+                poll_interval_ms);
+            if (store->Init() != ErrorCode::OK) {
+                LOG(ERROR)
+                    << "OpLogStoreFactory: failed to init LocalFsOpLogStore"
+                    << ", cluster_id=" << cluster_id
+                    << ", root_dir=" << oplog_root_dir;
+                return nullptr;
+            }
+            return store;
         }
         default:
             LOG(ERROR) << "OpLogStoreFactory: unknown store type";

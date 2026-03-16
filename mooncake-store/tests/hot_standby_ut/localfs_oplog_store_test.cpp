@@ -5,6 +5,7 @@
 
 #include "localfs_oplog_store.h"
 #include "oplog_serializer.h"
+#include "oplog_store_factory.h"
 
 namespace fs = std::filesystem;
 
@@ -14,16 +15,13 @@ namespace {
 class LocalFsOpLogStoreTest : public ::testing::Test {
    protected:
     void SetUp() override {
-        test_dir_ = "/tmp/localfs_oplog_test_" +
-                     std::to_string(::getpid()) + "_" +
-                     std::to_string(test_counter_++);
+        test_dir_ = "/tmp/localfs_oplog_test_" + std::to_string(::getpid()) +
+                    "_" + std::to_string(test_counter_++);
         fs::create_directories(test_dir_);
         cluster_id_ = "test_cluster";
     }
 
-    void TearDown() override {
-        fs::remove_all(test_dir_);
-    }
+    void TearDown() override { fs::remove_all(test_dir_); }
 
     std::unique_ptr<LocalFsOpLogStore> CreateWriter() {
         auto store = std::make_unique<LocalFsOpLogStore>(
@@ -39,8 +37,7 @@ class LocalFsOpLogStoreTest : public ::testing::Test {
         return store;
     }
 
-    OpLogEntry MakeEntry(uint64_t seq_id,
-                         const std::string& key = "test_key") {
+    OpLogEntry MakeEntry(uint64_t seq_id, const std::string& key = "test_key") {
         OpLogEntry entry;
         entry.sequence_id = seq_id;
         entry.op_type = OpType::PUT_END;
@@ -124,8 +121,7 @@ TEST_F(LocalFsOpLogStoreTest, WriteAsyncBatchFlush) {
                   store->WriteOpLog(MakeEntry(i), /*sync=*/false));
     }
     // Force flush by writing a sync entry
-    EXPECT_EQ(ErrorCode::OK,
-              store->WriteOpLog(MakeEntry(6), /*sync=*/true));
+    EXPECT_EQ(ErrorCode::OK, store->WriteOpLog(MakeEntry(6), /*sync=*/true));
 
     // All entries should be readable
     OpLogEntry read_entry;
@@ -229,8 +225,7 @@ TEST_F(LocalFsOpLogStoreTest, GetLatestSequenceIdFirstBoot) {
 TEST_F(LocalFsOpLogStoreTest, GetMaxSequenceIdEmpty) {
     auto store = CreateWriter();
     uint64_t seq = 0;
-    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND,
-              store->GetMaxSequenceId(seq));
+    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND, store->GetMaxSequenceId(seq));
 }
 
 TEST_F(LocalFsOpLogStoreTest, GetMaxSequenceIdAfterWrite) {
@@ -318,8 +313,7 @@ TEST_F(LocalFsOpLogStoreTest, SnapshotRecordAndGet) {
 TEST_F(LocalFsOpLogStoreTest, SnapshotNotFound) {
     auto store = CreateWriter();
     uint64_t seq = 0;
-    EXPECT_NE(ErrorCode::OK,
-              store->GetSnapshotSequenceId("nonexistent", seq));
+    EXPECT_NE(ErrorCode::OK, store->GetSnapshotSequenceId("nonexistent", seq));
 }
 
 TEST_F(LocalFsOpLogStoreTest, SnapshotIdValidation) {
@@ -329,8 +323,7 @@ TEST_F(LocalFsOpLogStoreTest, SnapshotIdValidation) {
     EXPECT_EQ(ErrorCode::INVALID_PARAMS,
               store->RecordSnapshotSequenceId("path/slash", 1));
     EXPECT_EQ(ErrorCode::INVALID_PARAMS,
-              store->RecordSnapshotSequenceId(
-                  std::string("null\0byte", 9), 1));
+              store->RecordSnapshotSequenceId(std::string("null\0byte", 9), 1));
 }
 
 // --- Cleanup tests ---
@@ -395,7 +388,7 @@ TEST_F(LocalFsOpLogStoreTest, ChangeNotifierBasic) {
     {
         std::unique_lock<std::mutex> lock(received_mutex);
         EXPECT_TRUE(received_cv.wait_for(lock, std::chrono::seconds(5),
-                                          [&] { return received.size() >= 1; }));
+                                         [&] { return received.size() >= 1; }));
     }
     EXPECT_EQ(1, received.size());
     EXPECT_EQ(1, received[0].sequence_id);
@@ -431,7 +424,7 @@ TEST_F(LocalFsOpLogStoreTest, ChangeNotifierCatchUp) {
     {
         std::unique_lock<std::mutex> lock(received_mutex);
         EXPECT_TRUE(received_cv.wait_for(lock, std::chrono::seconds(5),
-                                          [&] { return received.size() >= 5; }));
+                                         [&] { return received.size() >= 5; }));
     }
     EXPECT_EQ(5, received.size());
     EXPECT_EQ(1, received[0].sequence_id);
@@ -458,6 +451,63 @@ TEST_F(LocalFsOpLogStoreTest, ChangeNotifierStopNoMoreCallbacks) {
     writer->WriteOpLog(MakeEntry(1), /*sync=*/true);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     EXPECT_EQ(0, callback_count.load());
+}
+
+// --- Factory tests ---
+
+TEST_F(LocalFsOpLogStoreTest, FactoryCreateWriter) {
+    auto store =
+        OpLogStoreFactory::Create(OpLogStoreType::LOCAL_FS, cluster_id_,
+                                  OpLogStoreRole::WRITER, test_dir_, 100);
+    ASSERT_NE(nullptr, store);
+
+    // Should be able to write
+    OpLogEntry entry;
+    entry.sequence_id = 1;
+    entry.op_type = OpType::PUT_END;
+    entry.object_key = "factory_test";
+    entry.payload = "data";
+    EXPECT_EQ(ErrorCode::OK, store->WriteOpLog(entry, /*sync=*/true));
+
+    // Should be able to read back
+    OpLogEntry read_entry;
+    EXPECT_EQ(ErrorCode::OK, store->ReadOpLog(1, read_entry));
+    EXPECT_EQ(1, read_entry.sequence_id);
+}
+
+TEST_F(LocalFsOpLogStoreTest, FactoryCreateReader) {
+    // First create some data with a writer
+    {
+        auto writer =
+            OpLogStoreFactory::Create(OpLogStoreType::LOCAL_FS, cluster_id_,
+                                      OpLogStoreRole::WRITER, test_dir_, 100);
+        ASSERT_NE(nullptr, writer);
+        OpLogEntry entry;
+        entry.sequence_id = 1;
+        entry.op_type = OpType::PUT_END;
+        entry.object_key = "key";
+        entry.payload = "data";
+        writer->WriteOpLog(entry, /*sync=*/true);
+    }
+
+    // Reader should be able to read but not write
+    auto reader =
+        OpLogStoreFactory::Create(OpLogStoreType::LOCAL_FS, cluster_id_,
+                                  OpLogStoreRole::READER, test_dir_, 100);
+    ASSERT_NE(nullptr, reader);
+
+    OpLogEntry read_entry;
+    EXPECT_EQ(ErrorCode::OK, reader->ReadOpLog(1, read_entry));
+    EXPECT_EQ(1, read_entry.sequence_id);
+
+    // Writer should fail on reader
+    OpLogEntry new_entry;
+    new_entry.sequence_id = 2;
+    new_entry.op_type = OpType::PUT_END;
+    new_entry.object_key = "key2";
+    new_entry.payload = "data2";
+    EXPECT_EQ(ErrorCode::INVALID_PARAMS,
+              reader->WriteOpLog(new_entry, /*sync=*/true));
 }
 
 }  // namespace
