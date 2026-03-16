@@ -52,6 +52,8 @@ void PollingOpLogChangeNotifier::PollLoop() {
             }
             last_sequence_id_.store(entries.back().sequence_id);
             healthy_.store(true);
+            // Data available — poll again immediately to drain backlog
+            continue;
         } else if (err != ErrorCode::OK) {
             if (on_error_) {
                 on_error_(err);

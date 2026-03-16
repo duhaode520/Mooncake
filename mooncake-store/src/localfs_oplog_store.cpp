@@ -199,6 +199,28 @@ void LocalFsOpLogStore::CleanupTempFiles() {
 }
 
 // ============================================================
+// File read helper
+// ============================================================
+
+ErrorCode LocalFsOpLogStore::ReadUint64FromFile(const std::string& filepath,
+                                                uint64_t& value) const {
+    std::ifstream f(filepath);
+    if (!f) {
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    std::string content;
+    f >> content;
+    try {
+        value = std::stoull(content);
+    } catch (...) {
+        LOG(ERROR) << "ReadUint64FromFile: invalid content in " << filepath
+                   << ": " << content;
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    return ErrorCode::OK;
+}
+
+// ============================================================
 // Snapshot ID validation
 // ============================================================
 
@@ -329,29 +351,17 @@ ErrorCode LocalFsOpLogStore::ReadSegmentHeader(const std::string& filepath,
 
 ErrorCode LocalFsOpLogStore::ReadSegmentEntries(
     const std::string& filepath, std::vector<OpLogEntry>& entries) {
+    SegmentHeader header;
+    auto err = ReadSegmentHeader(filepath, header);
+    if (err != ErrorCode::OK) return err;
+
+    // Re-open and skip past header to read entries
     std::ifstream f(filepath, std::ios::binary);
     if (!f) {
         LOG(ERROR) << "ReadSegmentEntries: cannot open " << filepath;
         return ErrorCode::INTERNAL_ERROR;
     }
-
-    SegmentHeader header;
-    f.read(reinterpret_cast<char*>(&header), sizeof(header));
-    if (!f || static_cast<size_t>(f.gcount()) < sizeof(header)) {
-        LOG(ERROR) << "ReadSegmentEntries: truncated header in " << filepath;
-        return ErrorCode::INTERNAL_ERROR;
-    }
-
-    if (std::memcmp(header.magic, kSegmentMagic, 4) != 0) {
-        LOG(ERROR) << "ReadSegmentEntries: bad magic in " << filepath;
-        return ErrorCode::INTERNAL_ERROR;
-    }
-
-    if (header.version != kSegmentVersion) {
-        LOG(ERROR) << "ReadSegmentEntries: unsupported version "
-                   << header.version << " in " << filepath;
-        return ErrorCode::INTERNAL_ERROR;
-    }
+    f.seekg(sizeof(SegmentHeader));
 
     for (uint32_t i = 0; i < header.entry_count; ++i) {
         uint32_t len = 0;
@@ -570,27 +580,12 @@ ErrorCode LocalFsOpLogStore::ReadOpLogSince(uint64_t start_sequence_id,
 
 ErrorCode LocalFsOpLogStore::GetLatestSequenceId(uint64_t& sequence_id) {
     std::string latest_path = LatestFilePath();
-    if (!fs::exists(latest_path)) {
+    auto err = ReadUint64FromFile(latest_path, sequence_id);
+    if (err != ErrorCode::OK) {
+        // File doesn't exist yet — default to 0
         sequence_id = 0;
         return ErrorCode::OK;
     }
-
-    std::ifstream f(latest_path);
-    if (!f) {
-        LOG(ERROR) << "GetLatestSequenceId: cannot read " << latest_path;
-        return ErrorCode::INTERNAL_ERROR;
-    }
-
-    std::string content;
-    f >> content;
-    try {
-        sequence_id = std::stoull(content);
-    } catch (...) {
-        LOG(ERROR) << "GetLatestSequenceId: invalid content in " << latest_path
-                   << ": " << content;
-        return ErrorCode::INTERNAL_ERROR;
-    }
-
     return ErrorCode::OK;
 }
 
@@ -628,21 +623,9 @@ ErrorCode LocalFsOpLogStore::GetSnapshotSequenceId(
     }
 
     std::string path = BuildSnapshotPath(snapshot_id);
-    if (!fs::exists(path)) {
+    auto err = ReadUint64FromFile(path, sequence_id);
+    if (err != ErrorCode::OK) {
         return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
-    }
-
-    std::ifstream f(path);
-    if (!f) {
-        return ErrorCode::INTERNAL_ERROR;
-    }
-
-    std::string content;
-    f >> content;
-    try {
-        sequence_id = std::stoull(content);
-    } catch (...) {
-        return ErrorCode::INTERNAL_ERROR;
     }
 
     return ErrorCode::OK;

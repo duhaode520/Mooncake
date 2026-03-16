@@ -107,6 +107,10 @@ class LocalFsOpLogStore : public OpLogStore {
     // Snapshot ID validation
     static bool ValidateSnapshotId(const std::string& snapshot_id);
 
+    // Read a uint64 value from a single-value text file
+    ErrorCode ReadUint64FromFile(const std::string& filepath,
+                                 uint64_t& value) const;
+
     // Batch write thread
     void BatchWriteThread();
     void FlushBatch();
