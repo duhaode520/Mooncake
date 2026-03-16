@@ -114,6 +114,9 @@ add_hot_standby_ut_test(etcd_oplog_store_test
 add_hot_standby_ut_test(oplog_serializer_test
                         hot_standby_ut/oplog_serializer_test.cpp)
 
+add_hot_standby_ut_test(localfs_oplog_store_test
+                        hot_standby_ut/localfs_oplog_store_test.cpp)
+
 add_hot_standby_ut_test(ha_recovery_test
                         hot_standby_ut/ha_recovery_test.cpp)
 
