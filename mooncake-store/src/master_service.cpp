@@ -195,6 +195,8 @@ MasterService::MasterService(const MasterServiceConfig& config)
       enable_offload_(config.enable_offload),
       cluster_id_(config.cluster_id),
       oplog_store_type_(config.oplog_store_type),
+      oplog_store_root_dir_(config.oplog_store_root_dir),
+      oplog_poll_interval_ms_(config.oplog_poll_interval_ms),
       root_fs_dir_(config.root_fs_dir),
       global_file_segment_size_(config.global_file_segment_size),
       enable_disk_eviction_(config.enable_disk_eviction),
@@ -280,14 +282,13 @@ MasterService::MasterService(const MasterServiceConfig& config)
         }
     }
     // Initialize OpLogStore if HA is enabled.
-    // Uses OpLogStoreFactory to decouple from concrete EtcdOpLogStore.
-#ifdef STORE_USE_ETCD
+    // Uses OpLogStoreFactory to decouple from concrete store implementations.
     if (enable_ha_ && !cluster_id_.empty()) {
         // Try to create OpLogStore - if backend is not connected, operations
         // will fail but we can still use memory buffer as fallback.
         auto oplog_store = OpLogStoreFactory::Create(
             oplog_store_type_, cluster_id_, OpLogStoreRole::WRITER,
-            config_.oplog_store_root_dir, config_.oplog_poll_interval_ms);
+            oplog_store_root_dir_, oplog_poll_interval_ms_);
         if (!oplog_store) {
             LOG(WARNING) << "OpLogStore creation failed for cluster_id="
                          << cluster_id_
@@ -303,21 +304,12 @@ MasterService::MasterService(const MasterServiceConfig& config)
             oplog_manager_.SetOpLogStore(
                 std::shared_ptr<OpLogStore>(std::move(oplog_store)));
             LOG(INFO) << "OpLogStore initialized for cluster_id="
-                      << cluster_id_
-                      << " (etcd connection should be established "
-                      << "before MasterService construction)";
+                      << cluster_id_;
         }
     } else if (enable_ha_) {
         LOG(WARNING) << "HA mode enabled but cluster_id is empty, "
                         "OpLog will only be stored in memory buffer";
     }
-#else
-    if (enable_ha_) {
-        LOG(WARNING) << "HA mode enabled but STORE_USE_ETCD is not enabled at "
-                        "compile time, OpLog will only be stored in memory buffer. "
-                        "Recompile with -DSTORE_USE_ETCD=ON to enable etcd support.";
-    }
-#endif
 
     // Start pending durable mutation retry thread (HA only).
 #ifdef STORE_USE_ETCD
@@ -372,11 +364,10 @@ void MasterService::RestoreFromStandbySnapshot(
     // Prefer reading the true max seq from etcd (stronger than standby_last_seq),
     // fall back to caller-provided initial_oplog_sequence_id.
     uint64_t start_seq = initial_oplog_sequence_id;
-#ifdef STORE_USE_ETCD
     if (enable_ha_ && !cluster_id_.empty()) {
         auto store = OpLogStoreFactory::Create(
             oplog_store_type_, cluster_id_, OpLogStoreRole::READER,
-            config_.oplog_store_root_dir, config_.oplog_poll_interval_ms);
+            oplog_store_root_dir_, oplog_poll_interval_ms_);
         if (store) {
             uint64_t max_seq = 0;
             if (store->GetMaxSequenceId(max_seq) == ErrorCode::OK) {
@@ -384,7 +375,6 @@ void MasterService::RestoreFromStandbySnapshot(
             }
         }
     }
-#endif
     oplog_manager_.SetInitialSequenceId(start_seq);
 
     // 2) Restore metadata entries.

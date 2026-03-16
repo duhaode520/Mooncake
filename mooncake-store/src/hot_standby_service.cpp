@@ -166,16 +166,27 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     }
 #endif
 
+    // Connect to etcd only when using ETCD backend
 #ifdef STORE_USE_ETCD
-    // Connect to etcd
-    ErrorCode err = EtcdHelper::ConnectToEtcdStoreClient(etcd_endpoints.c_str());
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to connect to etcd: " << etcd_endpoints;
-        state_machine_.ProcessEvent(StandbyEvent::CONNECTION_FAILED);
-        return err;
+    if (config_.oplog_store_type == OpLogStoreType::ETCD) {
+        ErrorCode err =
+            EtcdHelper::ConnectToEtcdStoreClient(etcd_endpoints.c_str());
+        if (err != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to connect to etcd: " << etcd_endpoints;
+            state_machine_.ProcessEvent(StandbyEvent::CONNECTION_FAILED);
+            return err;
+        }
     }
+#else
+    if (config_.oplog_store_type == OpLogStoreType::ETCD) {
+        LOG(ERROR) << "ETCD backend requested but STORE_USE_ETCD is not "
+                      "enabled at compile time";
+        state_machine_.ProcessEvent(StandbyEvent::FATAL_ERROR);
+        return ErrorCode::INTERNAL_ERROR;
+    }
+#endif
 
-    // Transition to SYNCING state
+    // Transition to SYNCING state (always, regardless of backend)
     state_machine_.ProcessEvent(StandbyEvent::CONNECTED);
 
     // Preserve existing local state if HotStandbyService is restarted in-process:
@@ -313,14 +324,9 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
             std::thread(&HotStandbyService::VerificationLoop, this);
     }
 
-    LOG(INFO) << "HotStandbyService started, watching etcd OpLog for cluster: "
+    LOG(INFO) << "HotStandbyService started, watching OpLog for cluster: "
               << cluster_id << ", state=" << StandbyStateToString(GetState());
     return ErrorCode::OK;
-#else
-    state_machine_.ProcessEvent(StandbyEvent::FATAL_ERROR);
-    LOG(ERROR) << "STORE_USE_ETCD is not enabled, cannot start HotStandbyService";
-    return ErrorCode::INTERNAL_ERROR;
-#endif
 }
 
 void HotStandbyService::OnWatcherEvent(StandbyEvent event) {

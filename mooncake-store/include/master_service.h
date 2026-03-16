@@ -1144,6 +1144,9 @@ class MasterService {
     const std::string cluster_id_;
     // OpLog store type for HA
     const OpLogStoreType oplog_store_type_;
+    // OpLog store configuration
+    const std::string oplog_store_root_dir_;
+    const int oplog_poll_interval_ms_;
     // root filesystem directory for persistent storage
     const std::string root_fs_dir_;
     // global 3fs/nfs segment size
