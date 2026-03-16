@@ -209,7 +209,8 @@ TEST_F(HaRecoveryTest, GC_BasicCleanupSemantics) {
 
     // Verify deleted vs preserved
     OpLogEntry entry;
-    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND, mock_store_->ReadOpLog(14, entry));
+    EXPECT_EQ(ErrorCode::OPLOG_ENTRY_NOT_FOUND,
+              mock_store_->ReadOpLog(14, entry));
     EXPECT_EQ(ErrorCode::OK, mock_store_->ReadOpLog(15, entry));
     EXPECT_EQ(entry.sequence_id, 15u);
 

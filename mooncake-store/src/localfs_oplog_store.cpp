@@ -102,7 +102,7 @@ std::string LocalFsOpLogStore::LatestFilePath() const {
 }
 
 std::string LocalFsOpLogStore::BuildSegmentFilename(uint64_t min_seq,
-                                                     uint64_t max_seq) const {
+                                                    uint64_t max_seq) const {
     char buf[128];
     snprintf(buf, sizeof(buf), "seg_%020lu_%020lu", min_seq, max_seq);
     return SegmentsDir() + "/" + buf;
@@ -118,12 +118,12 @@ std::string LocalFsOpLogStore::BuildSnapshotPath(
 // ============================================================
 
 ErrorCode LocalFsOpLogStore::AtomicWriteFile(const std::string& target_path,
-                                              const std::string& content) {
+                                             const std::string& content) {
     return AtomicWriteFile(target_path, content.data(), content.size());
 }
 
 ErrorCode LocalFsOpLogStore::AtomicWriteFile(const std::string& target_path,
-                                              const void* data, size_t size) {
+                                             const void* data, size_t size) {
     std::string tmp_path = target_path + ".tmp";
     int fd = ::open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
@@ -173,8 +173,7 @@ ErrorCode LocalFsOpLogStore::AtomicWriteFile(const std::string& target_path,
 
 void LocalFsOpLogStore::CleanupTempFiles() {
     try {
-        for (auto& dir :
-             {SegmentsDir(), cluster_dir_}) {
+        for (auto& dir : {SegmentsDir(), cluster_dir_}) {
             if (!fs::exists(dir)) continue;
             for (auto& entry : fs::directory_iterator(dir)) {
                 if (entry.path().extension() == ".tmp") {
@@ -205,8 +204,8 @@ bool LocalFsOpLogStore::ValidateSnapshotId(const std::string& snapshot_id) {
 // ============================================================
 
 bool LocalFsOpLogStore::ParseSegmentFilename(const std::string& filename,
-                                              uint64_t& min_seq,
-                                              uint64_t& max_seq) {
+                                             uint64_t& min_seq,
+                                             uint64_t& max_seq) {
     // Expected format: seg_XXXXXXXXXXXXXXXXXXXX_XXXXXXXXXXXXXXXXXXXX
     if (filename.size() < 45) return false;
     if (filename.substr(0, 4) != "seg_") return false;
@@ -290,7 +289,7 @@ ErrorCode LocalFsOpLogStore::WriteSegmentFile(
 }
 
 ErrorCode LocalFsOpLogStore::ReadSegmentHeader(const std::string& filepath,
-                                                SegmentHeader& header) {
+                                               SegmentHeader& header) {
     std::ifstream f(filepath, std::ios::binary);
     if (!f) {
         LOG(ERROR) << "ReadSegmentHeader: cannot open " << filepath;
@@ -485,15 +484,13 @@ void LocalFsOpLogStore::FlushBatch() {
 // ============================================================
 
 ErrorCode LocalFsOpLogStore::ReadOpLog(uint64_t sequence_id,
-                                        OpLogEntry& entry) {
+                                       OpLogEntry& entry) {
     auto segments = ListSegments();
 
     // Binary search for the segment containing sequence_id
     auto it = std::lower_bound(
         segments.begin(), segments.end(), sequence_id,
-        [](const SegmentInfo& seg, uint64_t seq) {
-            return seg.max_seq < seq;
-        });
+        [](const SegmentInfo& seg, uint64_t seq) { return seg.max_seq < seq; });
 
     if (it == segments.end()) {
         return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
@@ -520,17 +517,17 @@ ErrorCode LocalFsOpLogStore::ReadOpLog(uint64_t sequence_id,
 }
 
 ErrorCode LocalFsOpLogStore::ReadOpLogSince(uint64_t start_sequence_id,
-                                             size_t limit,
-                                             std::vector<OpLogEntry>& entries) {
+                                            size_t limit,
+                                            std::vector<OpLogEntry>& entries) {
     entries.clear();
     auto segments = ListSegments();
 
     // Find first segment that could contain entries after start_sequence_id
-    auto it = std::lower_bound(
-        segments.begin(), segments.end(), start_sequence_id,
-        [](const SegmentInfo& seg, uint64_t seq) {
-            return seg.max_seq <= seq;
-        });
+    auto it =
+        std::lower_bound(segments.begin(), segments.end(), start_sequence_id,
+                         [](const SegmentInfo& seg, uint64_t seq) {
+                             return seg.max_seq <= seq;
+                         });
 
     for (; it != segments.end() && entries.size() < limit; ++it) {
         std::string filepath = SegmentsDir() + "/" + it->filename;
@@ -575,8 +572,8 @@ ErrorCode LocalFsOpLogStore::GetLatestSequenceId(uint64_t& sequence_id) {
     try {
         sequence_id = std::stoull(content);
     } catch (...) {
-        LOG(ERROR) << "GetLatestSequenceId: invalid content in "
-                   << latest_path << ": " << content;
+        LOG(ERROR) << "GetLatestSequenceId: invalid content in " << latest_path
+                   << ": " << content;
         return ErrorCode::INTERNAL_ERROR;
     }
 
@@ -641,8 +638,7 @@ ErrorCode LocalFsOpLogStore::GetSnapshotSequenceId(
 // Cleanup
 // ============================================================
 
-ErrorCode LocalFsOpLogStore::CleanupOpLogBefore(
-    uint64_t before_sequence_id) {
+ErrorCode LocalFsOpLogStore::CleanupOpLogBefore(uint64_t before_sequence_id) {
     auto segments = ListSegments();
     for (const auto& seg : segments) {
         if (seg.max_seq < before_sequence_id) {

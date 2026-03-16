@@ -64,8 +64,7 @@ void PollingOpLogChangeNotifier::PollLoop() {
         int remaining_ms = poll_interval_ms_;
         while (remaining_ms > 0 && running_.load()) {
             int sleep_ms = std::min(remaining_ms, 50);
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(sleep_ms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
             remaining_ms -= sleep_ms;
         }
     }

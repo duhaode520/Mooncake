@@ -34,7 +34,7 @@ struct MasterConfig {
     std::string cluster_id;
 
     // OpLog store configuration
-    std::string oplog_store_type;  // "etcd" or "localfs"
+    std::string oplog_store_type;      // "etcd" or "localfs"
     std::string oplog_store_root_dir;  // LocalFS OpLogStore root directory
     int oplog_poll_interval_ms;        // Polling interval for ChangeNotifier
     std::string root_fs_dir;
@@ -172,9 +172,10 @@ class MasterServiceSupervisorConfig {
         snapshot_backup_dir = config.snapshot_backup_dir;
         snapshot_interval_seconds = config.snapshot_interval_seconds;
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
-        // HA mode policy: force ETCD snapshot backend (ignore configured backend).
-        // IMPORTANT: Do not parse the configured backend first, since it may
-        // throw (e.g. S3 requested without AWS SDK). In HA mode we always use ETCD.
+        // HA mode policy: force ETCD snapshot backend (ignore configured
+        // backend). IMPORTANT: Do not parse the configured backend first, since
+        // it may throw (e.g. S3 requested without AWS SDK). In HA mode we
+        // always use ETCD.
         if (config.enable_ha) {
             snapshot_backend_type = SnapshotBackendType::ETCD;
         } else {

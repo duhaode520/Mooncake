@@ -19,9 +19,9 @@ namespace mooncake {
 class LocalFsOpLogStore : public OpLogStore {
    public:
     explicit LocalFsOpLogStore(const std::string& cluster_id,
-                                const std::string& root_dir,
-                                bool enable_batch_write,
-                                int poll_interval_ms = 1000);
+                               const std::string& root_dir,
+                               bool enable_batch_write,
+                               int poll_interval_ms = 1000);
     ~LocalFsOpLogStore();
 
     ErrorCode Init() override;
@@ -82,8 +82,7 @@ class LocalFsOpLogStore : public OpLogStore {
     std::string SegmentsDir() const;
     std::string SnapshotsDir() const;
     std::string LatestFilePath() const;
-    std::string BuildSegmentFilename(uint64_t min_seq,
-                                     uint64_t max_seq) const;
+    std::string BuildSegmentFilename(uint64_t min_seq, uint64_t max_seq) const;
     std::string BuildSnapshotPath(const std::string& snapshot_id) const;
 
     // Segment I/O
@@ -99,8 +98,8 @@ class LocalFsOpLogStore : public OpLogStore {
     // Atomic file write: write to .tmp, fsync, rename
     ErrorCode AtomicWriteFile(const std::string& target_path,
                               const std::string& content);
-    ErrorCode AtomicWriteFile(const std::string& target_path,
-                              const void* data, size_t size);
+    ErrorCode AtomicWriteFile(const std::string& target_path, const void* data,
+                              size_t size);
 
     // Cleanup temp files from previous crash
     void CleanupTempFiles();

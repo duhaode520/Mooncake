@@ -73,9 +73,9 @@ inline bool IsValidClusterIdComponent(const std::string& cluster_id) {
         return false;
     }
     for (unsigned char c : cluster_id) {
-        const bool ok =
-            (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
-            (c >= 'a' && c <= 'z') || c == '_' || c == '-' || c == '.';
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+                        (c >= 'a' && c <= 'z') || c == '_' || c == '-' ||
+                        c == '.';
         if (!ok) {
             return false;
         }
