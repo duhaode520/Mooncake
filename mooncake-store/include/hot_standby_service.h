@@ -16,6 +16,7 @@
 #include "oplog_change_notifier.h"
 #include "oplog_manager.h"
 #include "oplog_store.h"
+#include "oplog_store_factory.h"
 #include "oplog_replicator.h"
 #include "snapshot_provider.h"
 #include "standby_state_machine.h"
@@ -43,6 +44,9 @@ struct HotStandbyConfig {
     // If provided, Standby will try to load a snapshot first, then replay OpLog
     // from snapshot_sequence_id.
     bool enable_snapshot_bootstrap{false};
+
+    // OpLog store type
+    OpLogStoreType oplog_store_type{OpLogStoreType::ETCD};
 };
 
 /**

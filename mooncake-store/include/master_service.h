@@ -1142,6 +1142,8 @@ class MasterService {
 
     // cluster id for persistent sub directory
     const std::string cluster_id_;
+    // OpLog store type for persistent oplog storage
+    const OpLogStoreType oplog_store_type_;
     // root filesystem directory for persistent storage
     const std::string root_fs_dir_;
     // global 3fs/nfs segment size
