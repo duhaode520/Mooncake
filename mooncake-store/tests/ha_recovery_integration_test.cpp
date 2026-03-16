@@ -19,14 +19,17 @@
 #include <ylt/struct_pack.hpp>
 
 #include "hot_standby_service.h"
+#include "master_service.h"
 #include "oplog_manager.h"
 #include "oplog_store_factory.h"
+#include "segment.h"
 #include "serialize/serializer_backend.h"
 #include "serializer_snapshot_provider.h"
 #include "standby_state_machine.h"
 #include "types.h"
 
 #include "hot_standby_ut/mock_snapshot_provider.h"
+#include "master_service_test_for_snapshot_base.h"
 
 #ifdef STORE_USE_ETCD
 #include "etcd_helper.h"
@@ -66,6 +69,18 @@ std::string TestConfigName(
     return OpLogStoreTypeToString(info.param.oplog_store_type) + "_snap_" +
            info.param.snapshot_backend;
 }
+
+// ============================================================
+// Helper: persist snapshot via MasterService
+// ============================================================
+
+// Expose MasterServiceSnapshotTestBase::CallPersistState (protected)
+struct SnapshotPersistHelper
+    : public mooncake::test::MasterServiceSnapshotTestBase {
+    void TestBody() override {}  // satisfy pure virtual
+    using MasterServiceSnapshotTestBase::CallPersistState;
+    using MasterServiceSnapshotTestBase::GenerateSnapshotId;
+};
 
 // ============================================================
 // RAII Guard
@@ -117,7 +132,6 @@ class HaRecoveryIntegrationTest
         auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
         cluster_id_ =
             "ha_recovery_" + std::to_string(ts) + "_" + std::to_string(rng());
-        snapshot_root_ = "ha_test_snap_" + cluster_id_;
 
         // Writer-side OpLogStore via OpLogManager
         auto writer_store = OpLogStoreFactory::Create(
@@ -134,6 +148,9 @@ class HaRecoveryIntegrationTest
             mock_snapshot_ = std::make_shared<MockSnapshotProvider>();
         } else {
 #ifdef STORE_USE_ETCD
+            // Real backends use "master_snapshot" root (matches
+            // MasterService::SNAPSHOT_ROOT used by RestoreState)
+            snapshot_root_ = "master_snapshot";
             auto backend_type =
                 ParseSnapshotBackendType(config.snapshot_backend);
             snapshot_write_backend_ =
@@ -257,28 +274,69 @@ class HaRecoveryIntegrationTest
 
    private:
     void WriteSnapshotViaBackend(
-        const std::string& snap_id, uint64_t seq_id,
+        const std::string& /*snap_id*/, uint64_t /*seq_id*/,
         const std::vector<std::pair<std::string, StandbyObjectMetadata>>&
-        /*data*/) {
-        // Write manifest in MasterService::PersistSnapshot format
-        std::string prefix = snapshot_root_ + "/" + snap_id + "/";
+            data) {
+        // Create a temporary MasterService, populate it with test data,
+        // and persist a real snapshot. This ensures the snapshot uses the
+        // correct binary format (MessagePack + zstd) that RestoreState
+        // expects.
+        auto backend_type =
+            ParseSnapshotBackendType(GetParam().snapshot_backend);
+        auto cfg = MasterServiceConfig::builder()
+                       .set_enable_ha(false)
+                       .set_memory_allocator(BufferAllocatorType::OFFSET)
+                       .set_enable_snapshot(false)
+                       .set_enable_snapshot_restore(false)
+                       .set_snapshot_backend_type(backend_type)
+                       .set_etcd_endpoints(FLAGS_etcd_endpoints)
+                       .set_snapshot_backup_dir("/tmp/ha_recovery_snap_test")
+                       .build();
 
-        auto ts = std::chrono::duration_cast<std::chrono::seconds>(
-                      std::chrono::system_clock::now().time_since_epoch())
-                      .count();
-        std::string manifest = "struct_pack|1|" + snap_id + "|0|0|0|0|" +
-                               std::to_string(ts) + "|complete|" +
-                               std::to_string(seq_id);
-        auto r1 = snapshot_write_backend_->UploadString(prefix + "manifest.txt",
-                                                        manifest);
-        ASSERT_TRUE(r1.has_value()) << r1.error();
+        MasterService service(cfg);
 
-        auto r2 = snapshot_write_backend_->UploadString(
-            snapshot_root_ + "/latest.txt", snap_id);
-        ASSERT_TRUE(r2.has_value()) << r2.error();
+        // Mount a segment to satisfy PutStart allocation
+        Segment segment;
+        segment.id = generate_uuid();
+        segment.name = "test_snapshot_segment";
+        segment.base = 0x300000000;       // non-zero required by SegmentManager
+        segment.size = 16 * 1024 * 1024;  // 16MB
+        segment.te_endpoint = "test_snapshot_segment";
+        UUID client_id = generate_uuid();
+        auto mount_result = service.MountSegment(segment, client_id);
+        ASSERT_TRUE(mount_result.has_value())
+            << "MountSegment failed: "
+            << static_cast<int>(mount_result.error());
 
-        LOG(INFO) << "Wrote snapshot via backend: " << snap_id
-                  << " @ seq=" << seq_id;
+        // Put data through public API. Each PutEnd increments the internal
+        // oplog sequence_id, so after N puts the snapshot will have
+        // oplog_seq = N (matching InjectSnapshot(snap_id, N, data)).
+        ReplicateConfig replicate_config;
+        replicate_config.replica_num = 1;
+
+        for (const auto& [key, meta] : data) {
+            auto put_start_result =
+                service.PutStart(client_id, key, meta.size, replicate_config);
+            ASSERT_TRUE(put_start_result.has_value())
+                << "PutStart failed for key=" << key;
+            auto put_end_result =
+                service.PutEnd(client_id, key, ReplicaType::MEMORY);
+            ASSERT_TRUE(put_end_result.has_value())
+                << "PutEnd failed for key=" << key;
+        }
+
+        // Persist snapshot (writes to "master_snapshot/" via
+        // MasterService::SNAPSHOT_ROOT)
+        auto persist_snap_id = SnapshotPersistHelper().GenerateSnapshotId();
+        auto result =
+            SnapshotPersistHelper::CallPersistState(&service, persist_snap_id);
+        ASSERT_TRUE(result.has_value())
+            << "PersistState failed: " << result.error().message;
+
+        LOG(INFO) << "Wrote real snapshot via MasterService: "
+                  << persist_snap_id
+                  << " @ seq=" << service.GetOpLogLastSequenceId()
+                  << ", keys=" << data.size();
     }
 
     void CleanupTestData() {
@@ -322,10 +380,6 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================
 
 TEST_P(HaRecoveryIntegrationTest, E2E_SnapshotThenOpLogReplay) {
-    if (GetParam().snapshot_backend != "mock") {
-        GTEST_SKIP() << "Snapshot injection requires mock backend; "
-                     << "real backends need MasterService to persist snapshots";
-    }
     auto seq_ids = WriteEntries(20);
     ASSERT_EQ(seq_ids.size(), 20u);
     uint64_t last_seq = seq_ids.back();
@@ -343,10 +397,6 @@ TEST_P(HaRecoveryIntegrationTest, E2E_SnapshotThenOpLogReplay) {
 }
 
 TEST_P(HaRecoveryIntegrationTest, E2E_SnapshotRecoveryThenWatch) {
-    if (GetParam().snapshot_backend != "mock") {
-        GTEST_SKIP() << "Snapshot injection requires mock backend; "
-                     << "real backends need MasterService to persist snapshots";
-    }
     auto seq_ids = WriteEntries(20);
     uint64_t first_batch_last = seq_ids.back();
 
@@ -376,10 +426,6 @@ TEST_P(HaRecoveryIntegrationTest, E2E_SnapshotRecoveryThenWatch) {
 // ============================================================
 
 TEST_P(HaRecoveryIntegrationTest, E2E_GC_StandbyJoinsAfterCleanup) {
-    if (GetParam().snapshot_backend != "mock") {
-        GTEST_SKIP() << "Snapshot injection requires mock backend; "
-                     << "real backends need MasterService to persist snapshots";
-    }
     auto seq_ids = WriteEntries(20);
 
     auto snap_data = BuildSnapshotData(10);
