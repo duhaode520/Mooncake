@@ -66,9 +66,8 @@ class LocalFsHotStandbyIntegrationTest : public ::testing::Test {
     void SetUp() override {
         // Generate a unique temp directory per test
         static std::atomic<int> counter{0};
-        test_dir_ = "/tmp/localfs_ha_test_" +
-                     std::to_string(getpid()) + "_" +
-                     std::to_string(counter.fetch_add(1));
+        test_dir_ = "/tmp/localfs_ha_test_" + std::to_string(getpid()) + "_" +
+                    std::to_string(counter.fetch_add(1));
         cluster_id_ = "localfs_ha_cluster";
         poll_interval_ms_ = 100;  // fast polling for tests
 
@@ -79,8 +78,8 @@ class LocalFsHotStandbyIntegrationTest : public ::testing::Test {
         std::error_code ec;
         std::filesystem::remove_all(test_dir_, ec);
         if (ec) {
-            LOG(WARNING) << "Failed to remove test dir " << test_dir_
-                         << ": " << ec.message();
+            LOG(WARNING) << "Failed to remove test dir " << test_dir_ << ": "
+                         << ec.message();
         }
     }
 
@@ -112,8 +111,7 @@ class LocalFsHotStandbyIntegrationTest : public ::testing::Test {
                         std::chrono::seconds(timeout_sec);
         while (std::chrono::steady_clock::now() < deadline) {
             auto status = standby.GetSyncStatus();
-            LOG(INFO) << "Standby: state="
-                      << StandbyStateToString(status.state)
+            LOG(INFO) << "Standby: state=" << StandbyStateToString(status.state)
                       << ", applied_seq_id=" << status.applied_seq_id
                       << ", primary_seq_id=" << status.primary_seq_id
                       << ", lag_entries=" << status.lag_entries;
@@ -218,8 +216,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestStandbyPromotion) {
     HotStandbyService standby(MakeHotStandbyConfig());
     StandbyServiceGuard guard(&standby);
 
-    ASSERT_EQ(ErrorCode::OK,
-              standby.Start("", "", cluster_id_));
+    ASSERT_EQ(ErrorCode::OK, standby.Start("", "", cluster_id_));
 
     ASSERT_TRUE(WaitForSync(standby, last_seq_id));
 
@@ -273,8 +270,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestFailoverScenario) {
     HotStandbyService standby(MakeHotStandbyConfig());
     StandbyServiceGuard guard(&standby);
 
-    ASSERT_EQ(ErrorCode::OK,
-              standby.Start("", "", cluster_id_));
+    ASSERT_EQ(ErrorCode::OK, standby.Start("", "", cluster_id_));
 
     ASSERT_TRUE(WaitForSync(standby, last_seq_id));
 
@@ -291,8 +287,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestFailoverScenario) {
     }
     for (const auto& key : test_keys) {
         EXPECT_NE(snapshot_keys.end(), snapshot_keys.find(key))
-            << "Key " << key
-            << " should be in Standby after Primary failure";
+            << "Key " << key << " should be in Standby after Primary failure";
     }
 
     // 5. Promote
@@ -348,8 +343,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestDataConsistency) {
     HotStandbyService standby(MakeHotStandbyConfig());
     StandbyServiceGuard guard(&standby);
 
-    ASSERT_EQ(ErrorCode::OK,
-              standby.Start("", "", cluster_id_));
+    ASSERT_EQ(ErrorCode::OK, standby.Start("", "", cluster_id_));
 
     // 3. Wait for sync
     ASSERT_TRUE(WaitForSync(standby, last_seq_id));
@@ -369,8 +363,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestDataConsistency) {
                 << "Key " << kv.first << " should exist but not found";
         } else {
             EXPECT_EQ(actual_keys.end(), actual_keys.find(kv.first))
-                << "Key " << kv.first
-                << " should be removed but still exists";
+                << "Key " << kv.first << " should be removed but still exists";
         }
     }
 
@@ -390,8 +383,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestHighThroughputSync) {
     HotStandbyService standby(MakeHotStandbyConfig());
     StandbyServiceGuard guard(&standby);
 
-    ASSERT_EQ(ErrorCode::OK,
-              standby.Start("", "", cluster_id_));
+    ASSERT_EQ(ErrorCode::OK, standby.Start("", "", cluster_id_));
 
     // Wait for WATCHING state
     {
@@ -423,17 +415,15 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestHighThroughputSync) {
         }
     }
     auto write_end = std::chrono::steady_clock::now();
-    auto write_duration =
-        std::chrono::duration_cast<std::chrono::milliseconds>(write_end -
-                                                              write_start);
+    auto write_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        write_end - write_start);
 
     uint64_t last_seq_id = primary->GetLastSequenceId();
     LOG(INFO) << "Wrote " << num_writes << " entries in "
               << write_duration.count() << "ms, last_seq_id=" << last_seq_id;
 
     // 3. Monitor lag
-    auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     uint64_t max_lag = 0;
 
     while (std::chrono::steady_clock::now() < deadline) {
@@ -444,8 +434,7 @@ TEST_F(LocalFsHotStandbyIntegrationTest, TestHighThroughputSync) {
         LOG(INFO) << "Standby lag: " << status.lag_entries
                   << " entries, applied_seq_id=" << status.applied_seq_id
                   << ", primary_seq_id=" << status.primary_seq_id;
-        if (status.applied_seq_id >= last_seq_id &&
-            status.lag_entries == 0) {
+        if (status.applied_seq_id >= last_seq_id && status.lag_entries == 0) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));

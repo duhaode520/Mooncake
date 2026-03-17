@@ -158,6 +158,20 @@ class HaRecoveryIntegrationTest
         // Snapshot backend
         if (config.snapshot_backend == "mock") {
             mock_snapshot_ = std::make_shared<MockSnapshotProvider>();
+        } else if (config.snapshot_backend == "local") {
+            // LOCAL_FILE snapshot backend — no etcd required
+            snapshot_root_ = "master_snapshot";
+            static std::atomic<int> snap_counter{0};
+            localfs_snapshot_dir_ = "/tmp/ha_recovery_snap_" +
+                                    std::to_string(getpid()) + "_" +
+                                    std::to_string(snap_counter.fetch_add(1));
+            std::filesystem::create_directories(localfs_snapshot_dir_);
+            setenv("SNAPSHOT_LOCAL_PATH", localfs_snapshot_dir_.c_str(), 1);
+            auto backend_type =
+                ParseSnapshotBackendType(config.snapshot_backend);
+            snapshot_write_backend_ =
+                SerializerBackend::Create(backend_type, "");
+            ASSERT_NE(snapshot_write_backend_, nullptr);
         } else {
 #ifdef STORE_USE_ETCD
             // Real backends use "master_snapshot" root (matches
@@ -186,6 +200,16 @@ class HaRecoveryIntegrationTest
                 LOG(WARNING) << "Failed to remove localfs test dir "
                              << localfs_test_dir_ << ": " << ec.message();
             }
+        }
+        // Clean up local snapshot directory
+        if (!localfs_snapshot_dir_.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(localfs_snapshot_dir_, ec);
+            if (ec) {
+                LOG(WARNING) << "Failed to remove snapshot dir "
+                             << localfs_snapshot_dir_ << ": " << ec.message();
+            }
+            unsetenv("SNAPSHOT_LOCAL_PATH");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         test_lock_.reset();
@@ -249,9 +273,11 @@ class HaRecoveryIntegrationTest
         }
         auto config = GetParam();
         auto backend_type = ParseSnapshotBackendType(config.snapshot_backend);
+        std::string etcd_ep = (backend_type == SnapshotBackendType::LOCAL_FILE)
+                                  ? ""
+                                  : FLAGS_etcd_endpoints;
         return std::make_unique<SerializerBackendSnapshotProvider>(
-            backend_type, FLAGS_etcd_endpoints, BufferAllocatorType::OFFSET,
-            snapshot_root_);
+            backend_type, etcd_ep, BufferAllocatorType::OFFSET, snapshot_root_);
     }
 
     // --- Standby helpers ---
@@ -318,14 +344,21 @@ class HaRecoveryIntegrationTest
         // expects.
         auto backend_type =
             ParseSnapshotBackendType(GetParam().snapshot_backend);
+        std::string etcd_ep = (backend_type == SnapshotBackendType::LOCAL_FILE)
+                                  ? ""
+                                  : FLAGS_etcd_endpoints;
+        std::string snap_backup =
+            (backend_type == SnapshotBackendType::LOCAL_FILE)
+                ? localfs_snapshot_dir_ + "/backup"
+                : "/tmp/ha_recovery_snap_test";
         auto cfg = MasterServiceConfig::builder()
                        .set_enable_ha(false)
                        .set_memory_allocator(BufferAllocatorType::OFFSET)
                        .set_enable_snapshot(false)
                        .set_enable_snapshot_restore(false)
                        .set_snapshot_backend_type(backend_type)
-                       .set_etcd_endpoints(FLAGS_etcd_endpoints)
-                       .set_snapshot_backup_dir("/tmp/ha_recovery_snap_test")
+                       .set_etcd_endpoints(etcd_ep)
+                       .set_snapshot_backup_dir(snap_backup)
                        .build();
 
         MasterService service(cfg);
@@ -391,6 +424,7 @@ class HaRecoveryIntegrationTest
     std::string cluster_id_;
     std::string snapshot_root_;
     std::string localfs_test_dir_;
+    std::string localfs_snapshot_dir_;
     std::unique_ptr<OpLogManager> primary_oplog_;
 
     std::shared_ptr<MockSnapshotProvider> mock_snapshot_;
@@ -413,10 +447,11 @@ INSTANTIATE_TEST_SUITE_P(
     TestConfigName);
 #endif
 
-INSTANTIATE_TEST_SUITE_P(LocalFs, HaRecoveryIntegrationTest,
-                         ::testing::Values(HaRecoveryTestConfig{
-                             OpLogStoreType::LOCAL_FS, "mock"}),
-                         TestConfigName);
+INSTANTIATE_TEST_SUITE_P(
+    LocalFs, HaRecoveryIntegrationTest,
+    ::testing::Values(HaRecoveryTestConfig{OpLogStoreType::LOCAL_FS, "mock"},
+                      HaRecoveryTestConfig{OpLogStoreType::LOCAL_FS, "local"}),
+    TestConfigName);
 
 // ============================================================
 // Scenario 1: OpLog + Snapshot Joint Recovery (E2E)
