@@ -121,7 +121,12 @@ DEFINE_string(snapshot_backend, "local",
               "Snapshot storage backend type: 'local' for local filesystem, "
               "'s3' for S3 storage, 'etcd' for ETCD storage");
 DEFINE_string(oplog_store_type, "etcd",
-              "OpLog persistent storage backend type: 'etcd' (default)");
+              "OpLog persistent storage backend type: 'etcd' or 'localfs'");
+DEFINE_string(oplog_store_root_dir, "/tmp/mooncake_oplog",
+              "Root directory for LocalFS OpLog store");
+DEFINE_int32(oplog_poll_interval_ms, 1000,
+             "Polling interval in milliseconds for LocalFS OpLog change "
+             "notifier");
 // Task manager configuration
 DEFINE_uint32(max_total_finished_tasks, 10000,
               "Maximum number of finished tasks to keep in memory");
@@ -233,6 +238,12 @@ void InitMasterConf(const mooncake::DefaultConfig& default_config,
     default_config.GetString("oplog_store_type",
                              &master_config.oplog_store_type,
                              FLAGS_oplog_store_type);
+    default_config.GetString("oplog_store_root_dir",
+                             &master_config.oplog_store_root_dir,
+                             FLAGS_oplog_store_root_dir);
+    default_config.GetInt32("oplog_poll_interval_ms",
+                            &master_config.oplog_poll_interval_ms,
+                            FLAGS_oplog_poll_interval_ms);
     default_config.GetUInt32("max_total_finished_tasks",
                              &master_config.max_total_finished_tasks,
                              FLAGS_max_total_finished_tasks);
@@ -513,6 +524,16 @@ void LoadConfigFromCmdline(mooncake::MasterConfig& master_config,
         !conf_set) {
         master_config.oplog_store_type = FLAGS_oplog_store_type;
     }
+    if ((google::GetCommandLineFlagInfo("oplog_store_root_dir", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_store_root_dir = FLAGS_oplog_store_root_dir;
+    }
+    if ((google::GetCommandLineFlagInfo("oplog_poll_interval_ms", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_poll_interval_ms = FLAGS_oplog_poll_interval_ms;
+    }
 }
 
 // Function to start HTTP metadata server
@@ -661,7 +682,9 @@ int main(int argc, char* argv[]) {
         << master_config.snapshot_interval_seconds
         << ", snapshot_backup_dir=" << master_config.snapshot_backup_dir
         << ", snapshot_backend=" << master_config.snapshot_backend_type
-        << ", oplog_store_type=" << master_config.oplog_store_type;
+        << ", oplog_store_type=" << master_config.oplog_store_type
+        << ", oplog_store_root_dir=" << master_config.oplog_store_root_dir
+        << ", oplog_poll_interval_ms=" << master_config.oplog_poll_interval_ms;
 
     // Start HTTP metadata server if enabled
     std::unique_ptr<mooncake::HttpMetadataServer> http_metadata_server;
