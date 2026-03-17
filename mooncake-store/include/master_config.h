@@ -120,7 +120,7 @@ class MasterServiceSupervisorConfig {
     SnapshotBackendType snapshot_backend_type = SnapshotBackendType::LOCAL_FILE;
 
     // OpLog store configuration
-    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
+    OpLogStoreType oplog_store_type = kDefaultOpLogStoreType;
     std::string oplog_store_root_dir = kDefaultOpLogRootDir;
     int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
 
@@ -189,9 +189,7 @@ class MasterServiceSupervisorConfig {
         processing_task_timeout_sec = config.processing_task_timeout_sec;
 
         oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
-        oplog_store_root_dir = config.oplog_store_root_dir.empty()
-                                   ? kDefaultOpLogRootDir
-                                   : config.oplog_store_root_dir;
+        oplog_store_root_dir = config.oplog_store_root_dir;
         oplog_poll_interval_ms = config.oplog_poll_interval_ms;
 
         validate();
@@ -283,7 +281,7 @@ class WrappedMasterServiceConfig {
     std::string etcd_endpoints = "0.0.0.0:2379";
 
     // OpLog store configuration
-    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
+    OpLogStoreType oplog_store_type = kDefaultOpLogStoreType;
     std::string oplog_store_root_dir = kDefaultOpLogRootDir;
     int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
 
@@ -340,9 +338,7 @@ class WrappedMasterServiceConfig {
         processing_task_timeout_sec = config.processing_task_timeout_sec;
 
         oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
-        oplog_store_root_dir = config.oplog_store_root_dir.empty()
-                                   ? kDefaultOpLogRootDir
-                                   : config.oplog_store_root_dir;
+        oplog_store_root_dir = config.oplog_store_root_dir;
         oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 
@@ -444,7 +440,7 @@ class MasterServiceConfigBuilder {
     uint64_t processing_task_timeout_sec_ = DEFAULT_PROCESSING_TASK_TIMEOUT_SEC;
 
     // OpLog store configuration
-    OpLogStoreType oplog_store_type_ = OpLogStoreType::ETCD;
+    OpLogStoreType oplog_store_type_ = kDefaultOpLogStoreType;
     std::string oplog_store_root_dir_ = kDefaultOpLogRootDir;
     int oplog_poll_interval_ms_ = kDefaultOpLogPollIntervalMs;
 
@@ -672,7 +668,7 @@ class MasterServiceConfig {
     };
 
     // OpLog store configuration
-    OpLogStoreType oplog_store_type = OpLogStoreType::ETCD;
+    OpLogStoreType oplog_store_type = kDefaultOpLogStoreType;
     std::string oplog_store_root_dir = kDefaultOpLogRootDir;
     int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
 

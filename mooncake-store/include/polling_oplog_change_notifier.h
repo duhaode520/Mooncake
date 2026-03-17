@@ -2,6 +2,8 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 
 #include "oplog_change_notifier.h"
@@ -32,6 +34,10 @@ class PollingOpLogChangeNotifier : public OpLogChangeNotifier {
     std::thread poll_thread_;
     std::atomic<uint64_t> last_sequence_id_{0};
     std::atomic<bool> healthy_{false};
+
+    // For interruptible sleep on Stop()
+    std::mutex stop_mutex_;
+    std::condition_variable stop_cv_;
 
     static constexpr size_t kPollBatchSize = 1000;
 };

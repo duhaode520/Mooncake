@@ -55,7 +55,6 @@ LocalFsOpLogStore::~LocalFsOpLogStore() {
 ErrorCode LocalFsOpLogStore::Init() {
     try {
         fs::create_directories(SegmentsDir());
-        fs::create_directories(SnapshotsDir());
     } catch (const fs::filesystem_error& e) {
         LOG(ERROR) << "LocalFsOpLogStore::Init: failed to create directories: "
                    << e.what();
@@ -167,8 +166,7 @@ ErrorCode LocalFsOpLogStore::AtomicWriteFile(const std::string& target_path,
     // fsync parent directory to ensure the new directory entry is durable.
     // Critical for DFS mounts where rename visibility is not guaranteed
     // without an explicit directory sync.
-    std::string parent_dir =
-        fs::path(target_path).parent_path().string();
+    std::string parent_dir = fs::path(target_path).parent_path().string();
     int dir_fd = ::open(parent_dir.c_str(), O_RDONLY | O_DIRECTORY);
     if (dir_fd >= 0) {
         ::fsync(dir_fd);
@@ -482,10 +480,9 @@ void LocalFsOpLogStore::FlushBatch() {
     }
 
     if (err != ErrorCode::OK) {
-        LOG(ERROR) << "FlushBatch: all retries failed, "
-                   << entries.size() << " entries lost (seq "
-                   << entries.front().sequence_id << " - "
-                   << entries.back().sequence_id << ")";
+        LOG(ERROR) << "FlushBatch: all retries failed, " << entries.size()
+                   << " entries lost (seq " << entries.front().sequence_id
+                   << " - " << entries.back().sequence_id << ")";
         // Notify sync waiters so they don't block forever
         cv_sync_completed_.notify_all();
         return;
@@ -557,8 +554,7 @@ ErrorCode LocalFsOpLogStore::ReadOpLogSince(uint64_t start_sequence_id,
         std::vector<OpLogEntry> seg_entries;
         auto err = ReadSegmentEntries(filepath, seg_entries);
         if (err != ErrorCode::OK) {
-            LOG(ERROR) << "ReadOpLogSince: corrupted segment "
-                       << it->filename
+            LOG(ERROR) << "ReadOpLogSince: corrupted segment " << it->filename
                        << ", aborting read to prevent oplog gaps";
             return err;
         }
@@ -611,6 +607,14 @@ ErrorCode LocalFsOpLogStore::RecordSnapshotSequenceId(
     const std::string& snapshot_id, uint64_t sequence_id) {
     if (!ValidateSnapshotId(snapshot_id)) {
         return ErrorCode::INVALID_PARAMS;
+    }
+    // Create snapshots directory lazily on first write
+    try {
+        fs::create_directories(SnapshotsDir());
+    } catch (const fs::filesystem_error& e) {
+        LOG(ERROR) << "RecordSnapshotSequenceId: failed to create dir: "
+                   << e.what();
+        return ErrorCode::INTERNAL_ERROR;
     }
     return AtomicWriteFile(BuildSnapshotPath(snapshot_id),
                            std::to_string(sequence_id));

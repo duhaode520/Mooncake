@@ -56,7 +56,8 @@ class LocalFsOpLogStoreTest : public ::testing::Test {
 TEST_F(LocalFsOpLogStoreTest, InitCreatesDirectoryStructure) {
     auto store = CreateWriter();
     EXPECT_TRUE(fs::exists(test_dir_ + "/" + cluster_id_ + "/segments"));
-    EXPECT_TRUE(fs::exists(test_dir_ + "/" + cluster_id_ + "/snapshots"));
+    // snapshots dir is created lazily on first RecordSnapshotSequenceId
+    EXPECT_FALSE(fs::exists(test_dir_ + "/" + cluster_id_ + "/snapshots"));
     EXPECT_TRUE(fs::exists(test_dir_ + "/" + cluster_id_ + "/latest"));
 }
 

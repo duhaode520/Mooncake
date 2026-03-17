@@ -46,7 +46,7 @@ struct HotStandbyConfig {
     bool enable_snapshot_bootstrap{false};
 
     // OpLog store configuration
-    OpLogStoreType oplog_store_type{OpLogStoreType::ETCD};
+    OpLogStoreType oplog_store_type{kDefaultOpLogStoreType};
     std::string oplog_store_root_dir{kDefaultOpLogRootDir};
     int oplog_poll_interval_ms{kDefaultOpLogPollIntervalMs};
 };

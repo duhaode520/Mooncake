@@ -19,15 +19,26 @@ enum class OpLogStoreType {
     LOCAL_FS,
 };
 
+#ifdef STORE_USE_ETCD
+static constexpr OpLogStoreType kDefaultOpLogStoreType = OpLogStoreType::ETCD;
+#else
+static constexpr OpLogStoreType kDefaultOpLogStoreType =
+    OpLogStoreType::LOCAL_FS;
+#endif
+
 // Parse string to OpLogStoreType (case-insensitive).
-// Returns ETCD as default for unrecognized strings.
+// Parse string to OpLogStoreType (case-insensitive).
+// Returns kDefaultOpLogStoreType for unrecognized strings.
 inline OpLogStoreType ParseOpLogStoreType(const std::string& type_str) {
     std::string lower = type_str;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
     if (lower == "localfs" || lower == "local_fs") {
         return OpLogStoreType::LOCAL_FS;
     }
-    return OpLogStoreType::ETCD;
+    if (lower == "etcd") {
+        return OpLogStoreType::ETCD;
+    }
+    return kDefaultOpLogStoreType;
 }
 
 inline std::string OpLogStoreTypeToString(OpLogStoreType type) {

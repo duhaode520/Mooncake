@@ -29,6 +29,7 @@ ErrorCode PollingOpLogChangeNotifier::Start(uint64_t start_sequence_id,
 
 void PollingOpLogChangeNotifier::Stop() {
     running_.store(false);
+    stop_cv_.notify_all();
     if (poll_thread_.joinable()) {
         poll_thread_.join();
     }
@@ -61,13 +62,12 @@ void PollingOpLogChangeNotifier::PollLoop() {
             healthy_.store(false);
         }
 
-        // Sleep for poll interval, but check running_ more frequently
-        // to allow fast shutdown
-        int remaining_ms = poll_interval_ms_;
-        while (remaining_ms > 0 && running_.load()) {
-            int sleep_ms = std::min(remaining_ms, 50);
-            std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-            remaining_ms -= sleep_ms;
+        // Interruptible sleep: wakes immediately on Stop()
+        {
+            std::unique_lock<std::mutex> lock(stop_mutex_);
+            stop_cv_.wait_for(lock,
+                              std::chrono::milliseconds(poll_interval_ms_),
+                              [&] { return !running_.load(); });
         }
     }
 }
