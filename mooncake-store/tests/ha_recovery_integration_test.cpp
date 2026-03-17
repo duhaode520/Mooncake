@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <mutex>
 #include <random>
 #include <thread>
@@ -114,16 +115,18 @@ class HaRecoveryIntegrationTest
 
     void SetUp() override {
         auto config = GetParam();
-#ifdef STORE_USE_ETCD
+
+        // ETCD backend requires etcd connection
         if (config.oplog_store_type == OpLogStoreType::ETCD) {
+#ifdef STORE_USE_ETCD
             if (FLAGS_etcd_endpoints.empty()) {
                 GTEST_SKIP() << "etcd_endpoints not provided";
             }
             EtcdHelper::ConnectToEtcdStoreClient(FLAGS_etcd_endpoints);
-        }
 #else
-        GTEST_SKIP() << "STORE_USE_ETCD not enabled";
+            GTEST_SKIP() << "STORE_USE_ETCD not enabled";
 #endif
+        }
 
         test_lock_ = std::make_unique<std::lock_guard<std::mutex>>(test_mutex_);
 
@@ -133,11 +136,20 @@ class HaRecoveryIntegrationTest
         cluster_id_ =
             "ha_recovery_" + std::to_string(ts) + "_" + std::to_string(rng());
 
+        // LocalFS backend: create a unique temp directory
+        if (config.oplog_store_type == OpLogStoreType::LOCAL_FS) {
+            static std::atomic<int> dir_counter{0};
+            localfs_test_dir_ = "/tmp/ha_recovery_localfs_" +
+                                std::to_string(getpid()) + "_" +
+                                std::to_string(dir_counter.fetch_add(1));
+            std::filesystem::create_directories(localfs_test_dir_);
+        }
+
         // Writer-side OpLogStore via OpLogManager
         auto writer_store = OpLogStoreFactory::Create(
-            config.oplog_store_type, cluster_id_, OpLogStoreRole::WRITER);
+            config.oplog_store_type, cluster_id_, OpLogStoreRole::WRITER,
+            localfs_test_dir_, kLocalFsPollIntervalMs);
         ASSERT_NE(writer_store, nullptr);
-        ASSERT_EQ(writer_store->Init(), ErrorCode::OK);
 
         primary_oplog_ = std::make_unique<OpLogManager>();
         primary_oplog_->SetOpLogStore(
@@ -166,6 +178,15 @@ class HaRecoveryIntegrationTest
 #ifdef STORE_USE_ETCD
         CleanupTestData();
 #endif
+        // Clean up LocalFS temp directory
+        if (!localfs_test_dir_.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(localfs_test_dir_, ec);
+            if (ec) {
+                LOG(WARNING) << "Failed to remove localfs test dir "
+                             << localfs_test_dir_ << ": " << ec.message();
+            }
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         test_lock_.reset();
     }
@@ -177,12 +198,22 @@ class HaRecoveryIntegrationTest
         for (int i = 0; i < count; ++i) {
             std::string key = "key_" + std::to_string(i);
             std::string payload = MakeValidPayload();
-            uint64_t seq =
-                primary_oplog_->Append(OpType::PUT_END, key, payload);
-            seq_ids.push_back(seq);
+            if (i < count - 1) {
+                uint64_t seq =
+                    primary_oplog_->Append(OpType::PUT_END, key, payload);
+                seq_ids.push_back(seq);
+            } else {
+                // Use AppendAndPersist for the last entry to force flush
+                // (LocalFS batch writer is async)
+                auto result = primary_oplog_->AppendAndPersist(OpType::PUT_END,
+                                                               key, payload);
+                EXPECT_TRUE(result.has_value())
+                    << "AppendAndPersist failed for last entry";
+                seq_ids.push_back(result.has_value()
+                                      ? result.value()
+                                      : primary_oplog_->GetLastSequenceId());
+            }
         }
-        // Wait for async writes to flush
-        std::this_thread::sleep_for(std::chrono::milliseconds(3000));
         return seq_ids;
     }
 
@@ -233,6 +264,10 @@ class HaRecoveryIntegrationTest
         hs_config.max_replication_lag_entries = 1000;
         hs_config.enable_snapshot_bootstrap = enable_snapshot;
         hs_config.oplog_store_type = config.oplog_store_type;
+        if (config.oplog_store_type == OpLogStoreType::LOCAL_FS) {
+            hs_config.oplog_store_root_dir = localfs_test_dir_;
+            hs_config.oplog_poll_interval_ms = kLocalFsPollIntervalMs;
+        }
 
         auto standby = std::make_unique<HotStandbyService>(hs_config);
         if (enable_snapshot) {
@@ -355,10 +390,13 @@ class HaRecoveryIntegrationTest
    protected:
     std::string cluster_id_;
     std::string snapshot_root_;
+    std::string localfs_test_dir_;
     std::unique_ptr<OpLogManager> primary_oplog_;
 
     std::shared_ptr<MockSnapshotProvider> mock_snapshot_;
     std::unique_ptr<SerializerBackend> snapshot_write_backend_;
+
+    static constexpr int kLocalFsPollIntervalMs = 100;
 };
 
 std::mutex HaRecoveryIntegrationTest::test_mutex_;
@@ -374,6 +412,11 @@ INSTANTIATE_TEST_SUITE_P(
                       HaRecoveryTestConfig{OpLogStoreType::ETCD, "etcd"}),
     TestConfigName);
 #endif
+
+INSTANTIATE_TEST_SUITE_P(LocalFs, HaRecoveryIntegrationTest,
+                         ::testing::Values(HaRecoveryTestConfig{
+                             OpLogStoreType::LOCAL_FS, "mock"}),
+                         TestConfigName);
 
 // ============================================================
 // Scenario 1: OpLog + Snapshot Joint Recovery (E2E)
@@ -411,10 +454,15 @@ TEST_P(HaRecoveryIntegrationTest, E2E_SnapshotRecoveryThenWatch) {
 
     // Primary writes 10 more (keys key_20..key_29)
     for (int i = 20; i < 30; ++i) {
-        primary_oplog_->Append(OpType::PUT_END, "key_" + std::to_string(i),
-                               MakeValidPayload());
+        std::string key = "key_" + std::to_string(i);
+        if (i < 29) {
+            primary_oplog_->Append(OpType::PUT_END, key, MakeValidPayload());
+        } else {
+            auto result = primary_oplog_->AppendAndPersist(OpType::PUT_END, key,
+                                                           MakeValidPayload());
+            ASSERT_TRUE(result.has_value());
+        }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 
     uint64_t final_seq = primary_oplog_->GetLastSequenceId();
     ASSERT_TRUE(WaitForStandbySync(standby.get(), final_seq, 30));
@@ -433,9 +481,9 @@ TEST_P(HaRecoveryIntegrationTest, E2E_GC_StandbyJoinsAfterCleanup) {
 
     // GC seq 1~9
     auto writer = OpLogStoreFactory::Create(
-        GetParam().oplog_store_type, cluster_id_, OpLogStoreRole::WRITER);
+        GetParam().oplog_store_type, cluster_id_, OpLogStoreRole::WRITER,
+        localfs_test_dir_, kLocalFsPollIntervalMs);
     ASSERT_NE(writer, nullptr);
-    ASSERT_EQ(writer->Init(), ErrorCode::OK);
     ASSERT_EQ(writer->CleanupOpLogBefore(10), ErrorCode::OK);
 
     auto standby = StartStandby(/*enable_snapshot=*/true);
@@ -451,27 +499,32 @@ TEST_P(HaRecoveryIntegrationTest, E2E_GC_WithoutSnapshot_PartialData) {
 
     // GC seq 1~9, no snapshot
     auto writer = OpLogStoreFactory::Create(
-        GetParam().oplog_store_type, cluster_id_, OpLogStoreRole::WRITER);
+        GetParam().oplog_store_type, cluster_id_, OpLogStoreRole::WRITER,
+        localfs_test_dir_, kLocalFsPollIntervalMs);
     ASSERT_NE(writer, nullptr);
-    ASSERT_EQ(writer->Init(), ErrorCode::OK);
     ASSERT_EQ(writer->CleanupOpLogBefore(10), ErrorCode::OK);
 
     auto standby = StartStandby(/*enable_snapshot=*/false);
     ASSERT_NE(standby, nullptr);
     StandbyServiceGuard guard(standby.get());
 
-    // Negative test: without snapshot + GC, standby cannot recover GC'd
-    // entries. The OpLogApplier expects seq=1 but receives seq>=10, creating an
-    // unresolvable gap. The gap resolution (ProcessPendingEntries) is only
-    // triggered after a successful apply, which never happens here.
-    // Verify the standby does NOT sync within a short timeout.
-    EXPECT_FALSE(WaitForStandbySync(standby.get(), seq_ids.back(), 10));
+    if (GetParam().oplog_store_type == OpLogStoreType::LOCAL_FS) {
+        // LocalFS uses segment files that may contain entries spanning the
+        // GC boundary.  CleanupOpLogBefore only removes segments whose
+        // max_seq < threshold, so entries may survive GC.  In that case
+        // the standby successfully syncs all 20 entries.
+        EXPECT_TRUE(WaitForStandbySync(standby.get(), seq_ids.back(), 15));
+    } else {
+        // ETCD GC truly deletes individual keys, so the standby cannot
+        // recover GC'd entries without a snapshot.
+        EXPECT_FALSE(WaitForStandbySync(standby.get(), seq_ids.back(), 10));
 
-    // Verify standby state is still WATCHING (not crashed)
-    auto status = standby->GetSyncStatus();
-    EXPECT_EQ(status.state, StandbyState::WATCHING);
-    // applied_seq_id should be 0 (no entries applied)
-    EXPECT_EQ(status.applied_seq_id, 0u);
+        // Verify standby state is still WATCHING (not crashed)
+        auto status = standby->GetSyncStatus();
+        EXPECT_EQ(status.state, StandbyState::WATCHING);
+        // applied_seq_id should be 0 (no entries applied)
+        EXPECT_EQ(status.applied_seq_id, 0u);
+    }
 }
 
 // ============================================================
@@ -490,10 +543,19 @@ TEST_P(HaRecoveryIntegrationTest, E2E_PromotionFinalCatchUp) {
 
     // Primary writes 10 more
     for (int i = 10; i < 20; ++i) {
-        primary_oplog_->Append(OpType::PUT_END, "key_" + std::to_string(i),
-                               MakeValidPayload());
+        std::string key = "key_" + std::to_string(i);
+        if (i < 19) {
+            primary_oplog_->Append(OpType::PUT_END, key, MakeValidPayload());
+        } else {
+            auto result = primary_oplog_->AppendAndPersist(OpType::PUT_END, key,
+                                                           MakeValidPayload());
+            ASSERT_TRUE(result.has_value());
+        }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    // Brief wait to let async batch writes fully persist and give the
+    // standby's polling notifier time to pick up new entries before
+    // Promote() performs its final catch-up read.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     ErrorCode err = standby->Promote();
     ASSERT_EQ(ErrorCode::OK, err);

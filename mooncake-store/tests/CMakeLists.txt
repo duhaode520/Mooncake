@@ -117,19 +117,20 @@ add_hot_standby_ut_test(oplog_serializer_test
 add_hot_standby_ut_test(localfs_oplog_store_test
                         hot_standby_ut/localfs_oplog_store_test.cpp)
 
+add_hot_standby_ut_test(localfs_hot_standby_integration_test
+                        localfs_hot_standby_integration_test.cpp)
+
 add_hot_standby_ut_test(ha_recovery_test
                         hot_standby_ut/ha_recovery_test.cpp)
 
-if (STORE_USE_ETCD)
-    add_executable(ha_recovery_integration_test ha_recovery_integration_test.cpp)
-    target_include_directories(ha_recovery_integration_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        ${CMAKE_CURRENT_BINARY_DIR}/../include
-        ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    target_link_libraries(ha_recovery_integration_test PUBLIC
-        mooncake_store transfer_engine cachelib_memory_allocator
-        ${ETCD_WRAPPER_LIB} glog gflags ibverbs gtest pthread)
-    add_test(NAME ha_recovery_integration_test
-             COMMAND ha_recovery_integration_test)
-endif()
+add_executable(ha_recovery_integration_test ha_recovery_integration_test.cpp)
+target_include_directories(ha_recovery_integration_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_BINARY_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(ha_recovery_integration_test PUBLIC
+    mooncake_store transfer_engine cachelib_memory_allocator
+    ${ETCD_WRAPPER_LIB} glog gflags ibverbs gtest pthread)
+add_test(NAME ha_recovery_integration_test
+         COMMAND ha_recovery_integration_test)
