@@ -58,7 +58,8 @@ TEST_F(StandbyStateMachineTest, TestStartTransition) {
     EXPECT_EQ(StandbyState::STOPPED, result.old_state);
     EXPECT_EQ(StandbyState::CONNECTING, result.new_state);
     EXPECT_EQ(StandbyState::CONNECTING, machine_->GetState());
-    // In CONNECTING state, syncing has not actually started yet, so IsRunning/IsConnected should both be false
+    // In CONNECTING state, syncing has not actually started yet, so
+    // IsRunning/IsConnected should both be false
     EXPECT_FALSE(machine_->IsRunning());
     EXPECT_FALSE(machine_->IsConnected());
 }
@@ -413,12 +414,14 @@ TEST_F(StandbyStateMachineTest, TestConsecutiveErrors) {
 TEST_F(StandbyStateMachineTest, TestMaxErrorsReachedAutoTransition) {
     ReachWatchingState();
 
-    // IncrementErrors() automatically triggers MAX_ERRORS_REACHED when threshold is reached
+    // IncrementErrors() automatically triggers MAX_ERRORS_REACHED when
+    // threshold is reached
     for (int i = 0; i < StandbyStateMachine::kMaxConsecutiveErrors; ++i) {
         machine_->IncrementErrors();
     }
 
-    // Should have transitioned to RECOVERING (from WATCHING on MAX_ERRORS_REACHED)
+    // Should have transitioned to RECOVERING (from WATCHING on
+    // MAX_ERRORS_REACHED)
     EXPECT_EQ(StandbyState::RECOVERING, machine_->GetState());
     EXPECT_EQ(StandbyStateMachine::kMaxConsecutiveErrors,
               machine_->GetConsecutiveErrors());
@@ -454,11 +457,11 @@ TEST_F(StandbyStateMachineTest, TestStateChangeCallback) {
     std::vector<StandbyState> state_history;
     std::vector<StandbyEvent> event_history;
 
-    machine_->RegisterCallback(
-        [&](StandbyState old_state, StandbyState new_state, StandbyEvent event) {
-            state_history.push_back(new_state);
-            event_history.push_back(event);
-        });
+    machine_->RegisterCallback([&](StandbyState old_state,
+                                   StandbyState new_state, StandbyEvent event) {
+        state_history.push_back(new_state);
+        event_history.push_back(event);
+    });
 
     // Trigger state transitions
     machine_->ProcessEvent(StandbyEvent::START);
@@ -479,12 +482,10 @@ TEST_F(StandbyStateMachineTest, TestMultipleCallbacks) {
     int callback1_count = 0;
     int callback2_count = 0;
 
-    machine_->RegisterCallback([&](StandbyState, StandbyState, StandbyEvent) {
-        callback1_count++;
-    });
-    machine_->RegisterCallback([&](StandbyState, StandbyState, StandbyEvent) {
-        callback2_count++;
-    });
+    machine_->RegisterCallback(
+        [&](StandbyState, StandbyState, StandbyEvent) { callback1_count++; });
+    machine_->RegisterCallback(
+        [&](StandbyState, StandbyState, StandbyEvent) { callback2_count++; });
 
     // Trigger state transitions
     machine_->ProcessEvent(StandbyEvent::START);
@@ -552,7 +553,8 @@ TEST_F(StandbyStateMachineTest, TestTimeInState) {
 
     auto time_in_state = machine_->GetTimeInCurrentState();
     EXPECT_GE(time_in_state.count(), 100);
-    EXPECT_LE(time_in_state.count(), 200);  // Allow some margin for test execution
+    EXPECT_LE(time_in_state.count(),
+              200);  // Allow some margin for test execution
 }
 
 // ========== Concurrent Tests ==========
@@ -618,7 +620,8 @@ TEST_F(StandbyStateMachineTest, TestIsRunning) {
     EXPECT_FALSE(machine_->IsRunning());  // STOPPED
 
     machine_->ProcessEvent(StandbyEvent::START);
-    // CONNECTING only means establishing connection; sync has not started, so it is not considered "running"
+    // CONNECTING only means establishing connection; sync has not started, so
+    // it is not considered "running"
     EXPECT_FALSE(machine_->IsRunning());  // CONNECTING
 
     machine_->ProcessEvent(StandbyEvent::CONNECTED);
@@ -726,4 +729,3 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-

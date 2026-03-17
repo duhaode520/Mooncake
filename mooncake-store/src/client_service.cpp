@@ -177,8 +177,8 @@ ErrorCode Client::ConnectToMaster(const std::string& master_server_entry) {
     if (master_server_entry.find("etcd://") == 0) {
         // Support optional cluster_id in connection string:
         //   etcd://<endpoints>?cluster_id=<cluster_id>
-        // If not provided, MasterViewHelper will fall back to env MC_STORE_CLUSTER_ID,
-        // then DEFAULT_CLUSTER_ID.
+        // If not provided, MasterViewHelper will fall back to env
+        // MC_STORE_CLUSTER_ID, then DEFAULT_CLUSTER_ID.
         std::string etcd_entry = master_server_entry.substr(strlen("etcd://"));
         std::string cluster_id;
         {
@@ -1870,14 +1870,16 @@ void Client::PingThreadMain(bool is_ha_mode,
             ping_fail_count = 0;
             auto& ping_response = ping_result.value();
 
-            // In HA mode, actively check if view_version_id changed (master switched)
+            // In HA mode, actively check if view_version_id changed (master
+            // switched)
             if (is_ha_mode) {
                 if (!is_first_ping &&
                     ping_response.view_version_id != last_known_view_version) {
-                    LOG(INFO) << "Detected master view version change: "
-                              << last_known_view_version << " -> "
-                              << ping_response.view_version_id
-                              << ", fetching latest master view and reconnecting";
+                    LOG(INFO)
+                        << "Detected master view version change: "
+                        << last_known_view_version << " -> "
+                        << ping_response.view_version_id
+                        << ", fetching latest master view and reconnecting";
 
                     std::string new_master_address;
                     ViewVersionId new_version = 0;
@@ -1964,7 +1966,8 @@ void Client::PingThreadMain(bool is_ha_mode,
             }
 
             current_master_address = master_address;
-            last_known_view_version = next_version;  // Update version on reconnect
+            last_known_view_version =
+                next_version;  // Update version on reconnect
             LOG(INFO) << "Reconnected to master " << master_address;
             ping_fail_count = 0;
         } else {

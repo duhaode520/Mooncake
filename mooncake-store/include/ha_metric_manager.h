@@ -135,7 +135,8 @@ class HAMetricManager {
     int64_t get_oplog_batch_commits_total();
 
     /**
-     * @brief Increase the number of sync batch commits (triggered by DELETE/Sync ops)
+     * @brief Increase the number of sync batch commits (triggered by
+     * DELETE/Sync ops)
      */
     void inc_oplog_sync_batch_commits(int64_t count = 1);
     int64_t get_oplog_sync_batch_commits_total();
@@ -208,7 +209,8 @@ class HAMetricManager {
     ylt::metric::counter_t oplog_batch_commits_total_;
     ylt::metric::counter_t oplog_sync_batch_commits_total_;
 
-    // Latency Histograms (buckets in microseconds: 100us, 500us, 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s)
+    // Latency Histograms (buckets in microseconds: 100us, 500us, 1ms, 5ms,
+    // 10ms, 50ms, 100ms, 500ms, 1s)
     ylt::metric::histogram_t oplog_etcd_write_latency_us_;
     ylt::metric::histogram_t oplog_apply_latency_us_;
 
@@ -218,4 +220,3 @@ class HAMetricManager {
 };
 
 }  // namespace mooncake
-

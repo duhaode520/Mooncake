@@ -17,7 +17,8 @@
 
 // Forward declaration
 namespace mooncake {
-// ReplicationService forward declaration removed - using etcd-based OpLog sync instead
+// ReplicationService forward declaration removed - using etcd-based OpLog sync
+// instead
 }
 
 namespace mooncake {
@@ -32,9 +33,11 @@ class WrappedMasterService {
 
     void init_http_server();
 
-    // Restore metadata and OpLog sequence from a promoted Standby (fast failover).
+    // Restore metadata and OpLog sequence from a promoted Standby (fast
+    // failover).
     void RestoreFromStandby(
-        const std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot,
+        const std::vector<std::pair<std::string, StandbyObjectMetadata>>&
+            snapshot,
         uint64_t initial_oplog_sequence_id);
 
     tl::expected<bool, ErrorCode> ExistKey(const std::string& key);
@@ -163,7 +166,7 @@ class WrappedMasterService {
     std::thread metric_report_thread_;
     coro_http::coro_http_server http_server_;
     std::atomic<bool> metric_report_running_;
-    
+
     // ReplicationService removed - using etcd-based OpLog sync instead
 };
 

@@ -16,15 +16,12 @@ HAMetricManager& HAMetricManager::instance() {
 // --- Constructor ---
 HAMetricManager::HAMetricManager()
     // OpLog Sequence Gauges
-    : oplog_last_sequence_id_(
-          "ha_oplog_last_sequence_id",
-          "Latest OpLog sequence ID written by Primary"),
-      oplog_applied_sequence_id_(
-          "ha_oplog_applied_sequence_id",
-          "Latest OpLog sequence ID applied by Standby"),
-      oplog_standby_lag_(
-          "ha_oplog_standby_lag",
-          "Number of OpLog entries Standby is behind Primary"),
+    : oplog_last_sequence_id_("ha_oplog_last_sequence_id",
+                              "Latest OpLog sequence ID written by Primary"),
+      oplog_applied_sequence_id_("ha_oplog_applied_sequence_id",
+                                 "Latest OpLog sequence ID applied by Standby"),
+      oplog_standby_lag_("ha_oplog_standby_lag",
+                         "Number of OpLog entries Standby is behind Primary"),
       oplog_pending_entries_(
           "ha_oplog_pending_entries",
           "Number of out-of-order entries waiting in OpLogApplier"),
@@ -73,7 +70,8 @@ HAMetricManager::HAMetricManager()
       oplog_etcd_write_latency_us_(
           "ha_oplog_etcd_write_latency_us",
           "Latency of etcd write operations in microseconds",
-          {100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000}),
+          {100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000,
+           5000000}),
       oplog_apply_latency_us_(
           "ha_oplog_apply_latency_us",
           "Latency of OpLog entry application in microseconds",
@@ -314,4 +312,3 @@ std::string HAMetricManager::get_summary_string() {
 }
 
 }  // namespace mooncake
-

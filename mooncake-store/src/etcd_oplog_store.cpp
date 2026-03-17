@@ -43,18 +43,22 @@ ErrorCode EtcdOpLogStore::Init() {
         std::string latest_key = BuildLatestKey();
         std::string existing_value;
         EtcdRevisionId revision_id;
-        ErrorCode get_err = EtcdHelper::Get(latest_key.c_str(), latest_key.size(),
-                                            existing_value, revision_id);
+        ErrorCode get_err = EtcdHelper::Get(
+            latest_key.c_str(), latest_key.size(), existing_value, revision_id);
         if (get_err == ErrorCode::ETCD_KEY_NOT_EXIST) {
             // Key doesn't exist, safe to initialize to 0
             std::string initial_value = "0";
-            ErrorCode create_err = EtcdHelper::Create(latest_key.c_str(), latest_key.size(),
-                                                      initial_value.c_str(), initial_value.size());
+            ErrorCode create_err =
+                EtcdHelper::Create(latest_key.c_str(), latest_key.size(),
+                                   initial_value.c_str(), initial_value.size());
             if (create_err == ErrorCode::OK) {
-                LOG(INFO) << "Initialized /latest key to 0 for cluster_id=" << cluster_id_;
+                LOG(INFO) << "Initialized /latest key to 0 for cluster_id="
+                          << cluster_id_;
             } else if (create_err == ErrorCode::ETCD_TRANSACTION_FAIL) {
-                // Race condition: another instance created it between Get and Create
-                LOG(INFO) << "/latest key was created by another instance for cluster_id="
+                // Race condition: another instance created it between Get and
+                // Create
+                LOG(INFO) << "/latest key was created by another instance for "
+                             "cluster_id="
                           << cluster_id_;
             } else {
                 // Other errors (e.g., etcd not connected) are logged but don't
@@ -140,9 +144,8 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
     // that the existing value matches (idempotent retry) rather than
     // silently returning OK via the batch wait short-circuit.
     if (last_persisted_seq_id_.load() >= entry.sequence_id) {
-        ErrorCode create_err =
-            EtcdHelper::Create(key.c_str(), key.size(),
-                               value.c_str(), value.size());
+        ErrorCode create_err = EtcdHelper::Create(key.c_str(), key.size(),
+                                                  value.c_str(), value.size());
         if (create_err == ErrorCode::OK) {
             // Key didn't exist yet — written successfully.
             return ErrorCode::OK;
@@ -151,8 +154,8 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
             // Key already exists — check for idempotency vs fencing.
             std::string existing_value;
             EtcdRevisionId rev;
-            ErrorCode get_err = EtcdHelper::Get(
-                key.c_str(), key.size(), existing_value, rev);
+            ErrorCode get_err =
+                EtcdHelper::Get(key.c_str(), key.size(), existing_value, rev);
             if (get_err == ErrorCode::OK && existing_value == value) {
                 return ErrorCode::OK;  // Idempotent retry
             }
@@ -166,7 +169,8 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
 
     {
         std::unique_lock<std::mutex> lock(batch_mutex_);
-        pending_batch_.push_back({std::move(key), std::move(value), entry.sequence_id, sync});
+        pending_batch_.push_back(
+            {std::move(key), std::move(value), entry.sequence_id, sync});
 
         bool should_notify = false;
         if (sync) {
@@ -187,9 +191,8 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
             // Wait for persistence
             uint64_t target_seq = entry.sequence_id;
             bool success = cv_sync_completed_.wait_for(
-                lock, std::chrono::milliseconds(kSyncWaitTimeoutMs), [&] {
-                    return last_persisted_seq_id_.load() >= target_seq;
-                });
+                lock, std::chrono::milliseconds(kSyncWaitTimeoutMs),
+                [&] { return last_persisted_seq_id_.load() >= target_seq; });
             if (!success) {
                 LOG(ERROR) << "Timeout waiting for OpLog persistence, seq="
                            << target_seq;
@@ -206,7 +209,7 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
         // Warning: This is now done AFTER op log write, which is correct order.
         return UpdateLatestSequenceId(entry.sequence_id);
     }
-    
+
     // For batch update, we update the pending counter
     pending_latest_seq_id_.store(entry.sequence_id);
     size_t count = pending_count_.fetch_add(1) + 1;
@@ -303,13 +306,12 @@ void EtcdOpLogStore::FlushBatch() {
                         // Idempotent: same content already written.
                         continue;
                     }
-                    LOG(ERROR)
-                        << "Fencing violation: key=" << keys[j]
-                        << " already exists with different value";
+                    LOG(ERROR) << "Fencing violation: key=" << keys[j]
+                               << " already exists with different value";
                     all_ok = false;
                 } else {
-                    LOG(ERROR) << "Fallback Create failed for key="
-                               << keys[j] << ", err=" << create_err;
+                    LOG(ERROR) << "Fallback Create failed for key=" << keys[j]
+                               << ", err=" << create_err;
                     all_ok = false;
                 }
             }
@@ -319,9 +321,10 @@ void EtcdOpLogStore::FlushBatch() {
             break;  // Do not retry further; fallback already handled it.
         }
         if (i < kFlushRetryCount) {
-             LOG(WARNING) << "Failed to flush OpLog batch (attempt " << i + 1 
-                          << "/" << kFlushRetryCount + 1 << "), retrying...";
-             std::this_thread::sleep_for(std::chrono::milliseconds(kFlushRetryIntervalMs));
+            LOG(WARNING) << "Failed to flush OpLog batch (attempt " << i + 1
+                         << "/" << kFlushRetryCount + 1 << "), retrying...";
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(kFlushRetryIntervalMs));
         }
     }
 
@@ -365,15 +368,15 @@ void EtcdOpLogStore::FlushBatch() {
     cv_sync_completed_.notify_all();
 }
 
-
-ErrorCode EtcdOpLogStore::ReadOpLog(uint64_t sequence_id,
-                                     OpLogEntry& entry) {
+ErrorCode EtcdOpLogStore::ReadOpLog(uint64_t sequence_id, OpLogEntry& entry) {
     std::string key = BuildOpLogKey(sequence_id);
     std::string value;
     EtcdRevisionId revision_id;
-    ErrorCode err = EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
+    ErrorCode err =
+        EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
     if (err != ErrorCode::OK) {
-        // Translate etcd-specific "key not found" to the generic OpLogStore error.
+        // Translate etcd-specific "key not found" to the generic OpLogStore
+        // error.
         if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
             return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
         }
@@ -390,16 +393,15 @@ ErrorCode EtcdOpLogStore::ReadOpLog(uint64_t sequence_id,
 }
 
 ErrorCode EtcdOpLogStore::ReadOpLogSince(uint64_t start_sequence_id,
-                                          size_t limit,
-                                          std::vector<OpLogEntry>& entries) {
+                                         size_t limit,
+                                         std::vector<OpLogEntry>& entries) {
     EtcdRevisionId rev = 0;
     return ReadOpLogSinceWithRevision(start_sequence_id, limit, entries, rev);
 }
 
-ErrorCode EtcdOpLogStore::ReadOpLogSinceWithRevision(uint64_t start_sequence_id,
-                                                     size_t limit,
-                                                     std::vector<OpLogEntry>& entries,
-                                                     EtcdRevisionId& revision_id) {
+ErrorCode EtcdOpLogStore::ReadOpLogSinceWithRevision(
+    uint64_t start_sequence_id, size_t limit, std::vector<OpLogEntry>& entries,
+    EtcdRevisionId& revision_id) {
     entries.clear();
     entries.reserve(limit);
 
@@ -423,17 +425,17 @@ ErrorCode EtcdOpLogStore::ReadOpLogSinceWithRevision(uint64_t start_sequence_id,
 
     // Pagination:
     // - Use range-get with limit
-    // - Start next page from lastKey + '\0' (lexicographically just after lastKey)
-    // This avoids repeating the last key without adding new Go/C++ APIs.
+    // - Start next page from lastKey + '\0' (lexicographically just after
+    // lastKey) This avoids repeating the last key without adding new Go/C++
+    // APIs.
     revision_id = 0;
     while (entries.size() < limit) {
         const size_t page_limit = limit - entries.size();
         std::string json;
         EtcdRevisionId page_rev = 0;
-        ErrorCode err =
-            EtcdHelper::GetRangeAsJson(current_start_key.c_str(),
-                                       current_start_key.size(), end_key.c_str(),
-                                       end_key.size(), page_limit, json, page_rev);
+        ErrorCode err = EtcdHelper::GetRangeAsJson(
+            current_start_key.c_str(), current_start_key.size(),
+            end_key.c_str(), end_key.size(), page_limit, json, page_rev);
         if (err != ErrorCode::OK) {
             return err;
         }
@@ -509,7 +511,8 @@ ErrorCode EtcdOpLogStore::GetLatestSequenceId(uint64_t& sequence_id) {
     std::string key = BuildLatestKey();
     std::string value;
     EtcdRevisionId revision_id;
-    ErrorCode err = EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
+    ErrorCode err =
+        EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
     if (err != ErrorCode::OK) {
         if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
             return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
@@ -539,22 +542,25 @@ ErrorCode EtcdOpLogStore::GetMaxSequenceId(uint64_t& sequence_id) {
 ErrorCode EtcdOpLogStore::UpdateLatestSequenceId(uint64_t sequence_id) {
     std::string key = BuildLatestKey();
     std::string value = std::to_string(sequence_id);
-    return EtcdHelper::Put(key.c_str(), key.size(), value.c_str(), value.size());
+    return EtcdHelper::Put(key.c_str(), key.size(), value.c_str(),
+                           value.size());
 }
 
 ErrorCode EtcdOpLogStore::RecordSnapshotSequenceId(
     const std::string& snapshot_id, uint64_t sequence_id) {
     std::string key = BuildSnapshotKey(snapshot_id);
     std::string value = std::to_string(sequence_id);
-    return EtcdHelper::Put(key.c_str(), key.size(), value.c_str(), value.size());
+    return EtcdHelper::Put(key.c_str(), key.size(), value.c_str(),
+                           value.size());
 }
 
-ErrorCode EtcdOpLogStore::GetSnapshotSequenceId(
-    const std::string& snapshot_id, uint64_t& sequence_id) {
+ErrorCode EtcdOpLogStore::GetSnapshotSequenceId(const std::string& snapshot_id,
+                                                uint64_t& sequence_id) {
     std::string key = BuildSnapshotKey(snapshot_id);
     std::string value;
     EtcdRevisionId revision_id;
-    ErrorCode err = EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
+    ErrorCode err =
+        EtcdHelper::Get(key.c_str(), key.size(), value, revision_id);
     if (err != ErrorCode::OK) {
         if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
             return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
@@ -590,7 +596,8 @@ ErrorCode EtcdOpLogStore::CleanupOpLogBefore(uint64_t before_sequence_id) {
     }
 
     std::string start_key = BuildOpLogKey(min_seq);
-    std::string end_key = BuildOpLogKey(before_sequence_id);  // delete < before_sequence_id
+    std::string end_key =
+        BuildOpLogKey(before_sequence_id);  // delete < before_sequence_id
 
     return EtcdHelper::DeleteRange(start_key.c_str(), start_key.size(),
                                    end_key.c_str(), end_key.size());
@@ -600,16 +607,16 @@ std::string EtcdOpLogStore::BuildOpLogKey(uint64_t sequence_id) const {
     std::ostringstream oss;
     // Fixed-width encoding for correct etcd lexicographical range operations.
     // 20 digits is enough for uint64_t max (18446744073709551615).
-    oss << kOpLogPrefix << cluster_id_ << "/"
-        << std::setw(20) << std::setfill('0') << sequence_id;
+    oss << kOpLogPrefix << cluster_id_ << "/" << std::setw(20)
+        << std::setfill('0') << sequence_id;
     return oss.str();
 }
 
 std::optional<uint64_t> EtcdOpLogStore::GetMinSequenceId() const {
     std::string prefix = std::string(kOpLogPrefix) + cluster_id_ + "/";
     std::string first_key;
-    ErrorCode err =
-        EtcdHelper::GetFirstKeyWithPrefix(prefix.c_str(), prefix.size(), first_key);
+    ErrorCode err = EtcdHelper::GetFirstKeyWithPrefix(prefix.c_str(),
+                                                      prefix.size(), first_key);
     if (err != ErrorCode::OK) {
         return std::nullopt;
     }
@@ -635,12 +642,13 @@ std::optional<uint64_t> EtcdOpLogStore::GetMinSequenceId() const {
 }
 
 std::optional<uint64_t> EtcdOpLogStore::GetMaxSequenceIdInternal() const {
-    // Entry keys are fixed-width 20-digit numbers, which (in practice) start with '0'.
-    // Use "/0" to avoid picking up "/latest" which is lexicographically after digits.
+    // Entry keys are fixed-width 20-digit numbers, which (in practice) start
+    // with '0'. Use "/0" to avoid picking up "/latest" which is
+    // lexicographically after digits.
     std::string prefix = std::string(kOpLogPrefix) + cluster_id_ + "/0";
     std::string last_key;
-    ErrorCode err =
-        EtcdHelper::GetLastKeyWithPrefix(prefix.c_str(), prefix.size(), last_key);
+    ErrorCode err = EtcdHelper::GetLastKeyWithPrefix(prefix.c_str(),
+                                                     prefix.size(), last_key);
     if (err != ErrorCode::OK) {
         return std::nullopt;
     }
@@ -683,12 +691,13 @@ void EtcdOpLogStore::BatchUpdateThread() {
     while (batch_update_running_.load()) {
         std::this_thread::sleep_for(
             std::chrono::milliseconds(kBatchIntervalMs));
-        
+
         // Check if we need to update based on time interval
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - last_update_time_).count();
-        
+                           now - last_update_time_)
+                           .count();
+
         if (pending_count_.load() > 0 && elapsed >= kBatchIntervalMs) {
             DoBatchUpdate();
         }
@@ -709,15 +718,15 @@ void EtcdOpLogStore::DoBatchUpdate() {
         return;
     }
     std::lock_guard<std::mutex> lock(batch_update_mutex_);
-    
+
     // Get the pending sequence_id and reset counters
     uint64_t seq_id_to_update = pending_latest_seq_id_.load();
     size_t count = pending_count_.exchange(0);
-    
+
     if (count == 0) {
         return;  // Nothing to update
     }
-    
+
     // Update latest_sequence_id in etcd
     ErrorCode err = UpdateLatestSequenceId(seq_id_to_update);
     if (err != ErrorCode::OK) {
@@ -734,4 +743,3 @@ void EtcdOpLogStore::DoBatchUpdate() {
 }
 
 }  // namespace mooncake
-

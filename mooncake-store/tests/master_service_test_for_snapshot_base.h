@@ -169,8 +169,7 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
 
     bool GetEtcdValue(const std::string& key, std::string& value) const {
         EtcdRevisionId revision;
-        auto result =
-            EtcdHelper::Get(key.c_str(), key.size(), value, revision);
+        auto result = EtcdHelper::Get(key.c_str(), key.size(), value, revision);
         if (result != ErrorCode::OK) {
             LOG(ERROR) << "Etcd get failed for key: " << key
                        << ", error=" << static_cast<int>(result);
@@ -573,13 +572,14 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
 
     // ==================== File Operation Methods ====================
 
-    // Copy msgpack snapshot files to backup directory (or map backup id for etcd)
+    // Copy msgpack snapshot files to backup directory (or map backup id for
+    // etcd)
     void CopySnapshotToBackup(const std::string& snapshot_id,
                               const std::string& backup_id) const {
         if (UseEtcdSnapshotBackend()) {
             etcd_backup_id_map_[backup_id] = snapshot_id;
-            LOG(INFO) << "ETCD snapshot backup mapping: " << backup_id
-                      << " -> " << snapshot_id;
+            LOG(INFO) << "ETCD snapshot backup mapping: " << backup_id << " -> "
+                      << snapshot_id;
             return;
         }
         namespace fs = std::filesystem;
@@ -646,7 +646,8 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
         return is_equal;
     }
 
-    // Compare all msgpack files in two snapshot directories or etcd key prefixes
+    // Compare all msgpack files in two snapshot directories or etcd key
+    // prefixes
     bool CompareSnapshotDirectories(const std::string& dir1,
                                     const std::string& dir2) const {
         LOG(INFO) << "Comparing snapshot directories: " << dir1 << " vs "
@@ -672,21 +673,22 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
                 std::string value2;
                 if (!GetEtcdValue(key1, value1) ||
                     !GetEtcdValue(key2, value2)) {
-                    LOG(ERROR) << "Failed to read etcd keys for file: "
-                               << filename;
+                    LOG(ERROR)
+                        << "Failed to read etcd keys for file: " << filename;
                     all_match = false;
                     break;
                 }
                 if (value1.size() != value2.size()) {
-                    LOG(ERROR) << "Etcd value size differs for file: "
-                               << filename << ", size1=" << value1.size()
-                               << ", size2=" << value2.size();
+                    LOG(ERROR)
+                        << "Etcd value size differs for file: " << filename
+                        << ", size1=" << value1.size()
+                        << ", size2=" << value2.size();
                     all_match = false;
                     break;
                 }
                 if (value1 != value2) {
-                    LOG(ERROR) << "Etcd value content differs for file: "
-                               << filename;
+                    LOG(ERROR)
+                        << "Etcd value content differs for file: " << filename;
                     all_match = false;
                     break;
                 }

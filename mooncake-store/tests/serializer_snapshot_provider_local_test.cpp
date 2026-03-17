@@ -14,7 +14,8 @@
 
 namespace mooncake::test {
 
-class SerializerSnapshotProviderLocalTest : public MasterServiceSnapshotTestBase {
+class SerializerSnapshotProviderLocalTest
+    : public MasterServiceSnapshotTestBase {
    protected:
     static bool glog_initialized_;
 
@@ -27,8 +28,9 @@ class SerializerSnapshotProviderLocalTest : public MasterServiceSnapshotTestBase
             glog_initialized_ = true;
         }
 
-        snapshot_local_path_ = std::string("/tmp/mooncake_snapshots_provider_test_") +
-                               std::to_string(static_cast<long>(::getpid()));
+        snapshot_local_path_ =
+            std::string("/tmp/mooncake_snapshots_provider_test_") +
+            std::to_string(static_cast<long>(::getpid()));
         std::error_code ec;
         std::filesystem::remove_all(snapshot_local_path_, ec);
         std::filesystem::create_directories(snapshot_local_path_, ec);
@@ -52,11 +54,12 @@ bool SerializerSnapshotProviderLocalTest::glog_initialized_ = false;
 
 TEST_F(SerializerSnapshotProviderLocalTest,
        LoadLatestSnapshot_NonEmpty_ReturnsTrueAndContainsKey) {
-    auto service_config = MasterServiceConfig::builder()
-                              .set_memory_allocator(BufferAllocatorType::OFFSET)
-                              .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                              .set_enable_snapshot(false)
-                              .build();
+    auto service_config =
+        MasterServiceConfig::builder()
+            .set_memory_allocator(BufferAllocatorType::OFFSET)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .set_enable_snapshot(false)
+            .build();
 
     service_.reset(new MasterService(service_config));
 
@@ -67,21 +70,22 @@ TEST_F(SerializerSnapshotProviderLocalTest,
     repl.replica_num = 1;
     auto put_start = service_->PutStart(ctx.client_id, key, 1024, repl);
     ASSERT_TRUE(put_start.has_value());
-    ASSERT_TRUE(service_->PutEnd(ctx.client_id, key, ReplicaType::MEMORY).has_value());
+    ASSERT_TRUE(
+        service_->PutEnd(ctx.client_id, key, ReplicaType::MEMORY).has_value());
 
     const std::string snapshot_id = GenerateSnapshotId();
     auto persist = CallPersistState(service_.get(), snapshot_id);
     ASSERT_TRUE(persist.has_value()) << persist.error().message;
 
-    SerializerBackendSnapshotProvider provider(SnapshotBackendType::LOCAL_FILE, "",
-                                              BufferAllocatorType::OFFSET);
+    SerializerBackendSnapshotProvider provider(SnapshotBackendType::LOCAL_FILE,
+                                               "", BufferAllocatorType::OFFSET);
 
     std::string loaded_snapshot_id;
     uint64_t snapshot_seq_id = 0;
     std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
 
-    ASSERT_TRUE(provider.LoadLatestSnapshot("ignored_cluster", loaded_snapshot_id,
-                                           snapshot_seq_id, snapshot));
+    ASSERT_TRUE(provider.LoadLatestSnapshot(
+        "ignored_cluster", loaded_snapshot_id, snapshot_seq_id, snapshot));
     EXPECT_EQ(loaded_snapshot_id, snapshot_id);
     EXPECT_GT(snapshot_seq_id, 0u);
 
@@ -97,11 +101,12 @@ TEST_F(SerializerSnapshotProviderLocalTest,
 
 TEST_F(SerializerSnapshotProviderLocalTest,
        LoadLatestSnapshot_EmptySnapshot_ReturnsTrueWithEmptyData) {
-    auto service_config = MasterServiceConfig::builder()
-                              .set_memory_allocator(BufferAllocatorType::OFFSET)
-                              .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                              .set_enable_snapshot(false)
-                              .build();
+    auto service_config =
+        MasterServiceConfig::builder()
+            .set_memory_allocator(BufferAllocatorType::OFFSET)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .set_enable_snapshot(false)
+            .build();
 
     service_.reset(new MasterService(service_config));
 
@@ -109,15 +114,15 @@ TEST_F(SerializerSnapshotProviderLocalTest,
     auto persist = CallPersistState(service_.get(), snapshot_id);
     ASSERT_TRUE(persist.has_value()) << persist.error().message;
 
-    SerializerBackendSnapshotProvider provider(SnapshotBackendType::LOCAL_FILE, "",
-                                              BufferAllocatorType::OFFSET);
+    SerializerBackendSnapshotProvider provider(SnapshotBackendType::LOCAL_FILE,
+                                               "", BufferAllocatorType::OFFSET);
 
     std::string loaded_snapshot_id;
     uint64_t snapshot_seq_id = 0;
     std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
 
-    ASSERT_TRUE(provider.LoadLatestSnapshot("ignored_cluster", loaded_snapshot_id,
-                                           snapshot_seq_id, snapshot));
+    ASSERT_TRUE(provider.LoadLatestSnapshot(
+        "ignored_cluster", loaded_snapshot_id, snapshot_seq_id, snapshot));
     EXPECT_EQ(loaded_snapshot_id, snapshot_id);
     EXPECT_TRUE(snapshot.empty());
 }

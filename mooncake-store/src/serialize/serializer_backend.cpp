@@ -240,9 +240,9 @@ tl::expected<void, std::string> EtcdBackend::DeleteObjectsWithPrefix(
     const std::string& prefix) {
     char* err_msg = nullptr;
     // usePrefix=1 enables etcd's WithPrefix() option in the Go wrapper
-    int ret = SnapshotStoreDeleteWrapper(
-        const_cast<char*>(prefix.data()), static_cast<int>(prefix.size()),
-        /*usePrefix=*/1, &err_msg);
+    int ret = SnapshotStoreDeleteWrapper(const_cast<char*>(prefix.data()),
+                                         static_cast<int>(prefix.size()),
+                                         /*usePrefix=*/1, &err_msg);
     if (ret != 0) {
         std::string error =
             err_msg ? err_msg : "SnapshotStoreDeleteWrapper failed";

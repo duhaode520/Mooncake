@@ -215,9 +215,10 @@ void InitMasterConf(const mooncake::DefaultConfig& default_config,
     default_config.GetBool("enable_snapshot_restore",
                            &master_config.enable_snapshot_restore,
                            FLAGS_enable_snapshot_restore);
-    default_config.GetBool("enable_snapshot_restore_clean_metadata",
-                           &master_config.enable_snapshot_restore_clean_metadata,
-                           FLAGS_enable_snapshot_restore_clean_metadata);
+    default_config.GetBool(
+        "enable_snapshot_restore_clean_metadata",
+        &master_config.enable_snapshot_restore_clean_metadata,
+        FLAGS_enable_snapshot_restore_clean_metadata);
     default_config.GetBool("enable_snapshot", &master_config.enable_snapshot,
                            FLAGS_enable_snapshot);
     default_config.GetUInt64("snapshot_interval_seconds",
@@ -569,7 +570,8 @@ int main(int argc, char* argv[]) {
     //   Therefore `enable_snapshot_restore` is ignored when enable_ha=true.
     if (master_config.enable_ha) {
         if (master_config.enable_snapshot_restore) {
-            LOG(WARNING) << "enable_snapshot_restore is ignored in HA mode; forcing it to false";
+            LOG(WARNING) << "enable_snapshot_restore is ignored in HA mode; "
+                            "forcing it to false";
         }
         master_config.enable_snapshot_restore = false;
 
@@ -578,7 +580,8 @@ int main(int argc, char* argv[]) {
         // - Enforce ETCD backend; ignore `--snapshot_backend` or config file.
         if (master_config.snapshot_backend_type != "etcd" &&
             master_config.snapshot_backend_type != "ETCD") {
-            LOG(WARNING) << "snapshot_backend is ignored in HA mode; forcing it to 'etcd' (was: "
+            LOG(WARNING) << "snapshot_backend is ignored in HA mode; forcing "
+                            "it to 'etcd' (was: "
                          << master_config.snapshot_backend_type << ")";
         }
         master_config.snapshot_backend_type = "etcd";
