@@ -13,9 +13,11 @@
 
 // Command line flags
 DEFINE_string(hostname, "localhost:9001", "Local hostname for the client");
-DEFINE_string(metadata_server, "P2PHANDSHAKE",
-              "Metadata server connection string. Use 'P2PHANDSHAKE' for P2P mode "
-              "(no HTTP metadata server required), or 'http://IP:PORT/metadata' for HTTP mode");
+DEFINE_string(
+    metadata_server, "P2PHANDSHAKE",
+    "Metadata server connection string. Use 'P2PHANDSHAKE' for P2P mode "
+    "(no HTTP metadata server required), or 'http://IP:PORT/metadata' for HTTP "
+    "mode");
 DEFINE_string(protocol, "tcp", "Transfer protocol: rdma|tcp");
 DEFINE_string(device_name, "", "Device name to use, valid if protocol=rdma");
 DEFINE_string(master_server_entry, "127.0.0.1:50051",
@@ -24,13 +26,14 @@ DEFINE_int32(segment_size_mb, 128, "Segment size in MB");
 DEFINE_int32(value_size, 1024, "Value size in bytes (default: 1KB)");
 DEFINE_int32(operation_interval_microsec, 1,
              "Interval between operations (GET+PUT) in microseconds");
-DEFINE_int32(max_operations, 0,
-             "Maximum number of operations (0 = unlimited)");
-DEFINE_int32(key_space_size, 1000,
-             "Key space size (number of unique keys to choose from). "
-             "Smaller values lead to higher hit rates as more keys are written");
-DEFINE_int32(stats_report_interval, 10,
-             "Report statistics every N operations (0 = disable periodic reports)");
+DEFINE_int32(max_operations, 0, "Maximum number of operations (0 = unlimited)");
+DEFINE_int32(
+    key_space_size, 1000,
+    "Key space size (number of unique keys to choose from). "
+    "Smaller values lead to higher hit rates as more keys are written");
+DEFINE_int32(
+    stats_report_interval, 10,
+    "Report statistics every N operations (0 = disable periodic reports)");
 
 namespace mooncake {
 namespace testing {
@@ -50,7 +53,8 @@ class ClientPutTester {
     bool Initialize() {
         // Reinitialize key distribution with the actual key space size
         // (after gflags parsing)
-        key_dist_ = std::uniform_int_distribution<>(0, FLAGS_key_space_size - 1);
+        key_dist_ =
+            std::uniform_int_distribution<>(0, FLAGS_key_space_size - 1);
 
         // Create client wrapper
         auto client_opt = ClientTestWrapper::CreateClientWrapper(
@@ -66,7 +70,8 @@ class ClientPutTester {
         LOG(INFO) << "Successfully created client wrapper";
 
         // Mount a segment
-        size_t segment_size = static_cast<size_t>(FLAGS_segment_size_mb) * 1024 * 1024;
+        size_t segment_size =
+            static_cast<size_t>(FLAGS_segment_size_mb) * 1024 * 1024;
         void* buffer = nullptr;
         ErrorCode mount_err = client_->Mount(segment_size, buffer);
         if (mount_err != ErrorCode::OK) {
@@ -83,14 +88,15 @@ class ClientPutTester {
 
     void Run() {
         LOG(INFO) << "Starting inference simulation test:";
-        LOG(INFO) << "  Operation interval: " << FLAGS_operation_interval_microsec
-                  << " us";
+        LOG(INFO) << "  Operation interval: "
+                  << FLAGS_operation_interval_microsec << " us";
         LOG(INFO) << "  Value size: " << FLAGS_value_size << " bytes";
         LOG(INFO) << "  Key space size: " << FLAGS_key_space_size
                   << " (smaller = higher hit rate as data accumulates)";
         LOG(INFO) << "  Max operations: "
-                  << (FLAGS_max_operations > 0 ? std::to_string(FLAGS_max_operations)
-                                               : "unlimited");
+                  << (FLAGS_max_operations > 0
+                          ? std::to_string(FLAGS_max_operations)
+                          : "unlimited");
         LOG(INFO) << "  Stats report interval: "
                   << (FLAGS_stats_report_interval > 0
                           ? std::to_string(FLAGS_stats_report_interval)
@@ -111,7 +117,8 @@ class ClientPutTester {
             if (get_err == ErrorCode::OK) {
                 // GET hit: key exists, no need to PUT
                 get_hits_++;
-                VLOG(1) << "[REQUEST #" << total_requests_ << "] GET HIT: key=" << key
+                VLOG(1) << "[REQUEST #" << total_requests_
+                        << "] GET HIT: key=" << key
                         << ", value_size=" << retrieved_value.size();
             } else if (get_err == ErrorCode::OBJECT_NOT_FOUND) {
                 // GET miss: key doesn't exist, need to PUT
@@ -150,7 +157,8 @@ class ClientPutTester {
             // Check if we've reached the maximum number of operations
             if (FLAGS_max_operations > 0 &&
                 total_requests_ >= FLAGS_max_operations) {
-                LOG(INFO) << "Reached maximum operations limit: " << total_requests_;
+                LOG(INFO) << "Reached maximum operations limit: "
+                          << total_requests_;
                 break;
             }
 
@@ -170,39 +178,44 @@ class ClientPutTester {
     }
 
    private:
-    void ReportStatistics(const std::chrono::steady_clock::time_point& start_time) {
+    void ReportStatistics(
+        const std::chrono::steady_clock::time_point& start_time) {
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
 
         double hit_rate = 0.0;
         if (total_requests_ > 0) {
-            hit_rate = (static_cast<double>(get_hits_) / total_requests_) * 100.0;
+            hit_rate =
+                (static_cast<double>(get_hits_) / total_requests_) * 100.0;
         }
 
         double put_success_rate = 0.0;
         if (put_count_ > 0) {
-            put_success_rate = (static_cast<double>(put_success_) / put_count_) * 100.0;
+            put_success_rate =
+                (static_cast<double>(put_success_) / put_count_) * 100.0;
         }
 
         LOG(INFO) << "========================================";
         LOG(INFO) << "Statistics (after " << total_requests_ << " requests, "
                   << elapsed.count() << "s elapsed):";
         LOG(INFO) << "  Total requests: " << total_requests_;
-        LOG(INFO) << "  GET hits: " << get_hits_ << " ("
-                  << std::fixed << std::setprecision(2) << hit_rate << "%)";
+        LOG(INFO) << "  GET hits: " << get_hits_ << " (" << std::fixed
+                  << std::setprecision(2) << hit_rate << "%)";
         LOG(INFO) << "  GET misses: " << get_misses_;
         LOG(INFO) << "  PUT attempts: " << put_count_;
-        LOG(INFO) << "  PUT success: " << put_success_ << " ("
-                  << std::fixed << std::setprecision(2) << put_success_rate << "%)";
+        LOG(INFO) << "  PUT success: " << put_success_ << " (" << std::fixed
+                  << std::setprecision(2) << put_success_rate << "%)";
         LOG(INFO) << "  PUT failures: " << put_failures_;
-        LOG(INFO) << "  Unique keys written: ~" << put_success_
-                  << " (out of " << FLAGS_key_space_size << " key space)";
+        LOG(INFO) << "  Unique keys written: ~" << put_success_ << " (out of "
+                  << FLAGS_key_space_size << " key space)";
         LOG(INFO) << "========================================";
     }
 
     std::string GenerateRandomKey() {
-        // Generate a random key from the key space: test_key_<0 to key_space_size-1>
-        // This ensures that as more keys are written, the hit rate increases
+        // Generate a random key from the key space: test_key_<0 to
+        // key_space_size-1> This ensures that as more keys are written, the hit
+        // rate increases
         int key_index = key_dist_(gen_);
         return "test_key_" + std::to_string(key_index);
     }
@@ -258,4 +271,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-

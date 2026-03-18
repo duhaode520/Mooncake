@@ -19,8 +19,8 @@ namespace mooncake {
 /**
  * @brief Store for OpLog entries in etcd.
  *
- * This class is responsible for writing OpLog entries to etcd and reading them back.
- * OpLog entries are stored with keys in the format:
+ * This class is responsible for writing OpLog entries to etcd and reading them
+ * back. OpLog entries are stored with keys in the format:
  *   /oplog/{cluster_id}/{sequence_id}
  *
  * The latest sequence_id is also stored at:
@@ -83,21 +83,22 @@ class EtcdOpLogStore : public OpLogStore {
 
     // Like ReadOpLogSince, but also returns the etcd revision for consistent
     // "read then watch(from revision+1)" startup.
-    ErrorCode ReadOpLogSinceWithRevision(uint64_t start_sequence_id, size_t limit,
+    ErrorCode ReadOpLogSinceWithRevision(uint64_t start_sequence_id,
+                                         size_t limit,
                                          std::vector<OpLogEntry>& entries,
                                          EtcdRevisionId& revision_id);
 
     /**
      * @brief Get the latest sequence_id from etcd.
      * @param sequence_id: Output param, the latest sequence_id.
-     * @return: Error code. ETCD_KEY_NOT_EXIST if no OpLog exists yet.
+     * @return: Error code. OPLOG_ENTRY_NOT_FOUND if no OpLog exists yet.
      */
     ErrorCode GetLatestSequenceId(uint64_t& sequence_id) override;
 
     // Stronger (than `/latest`) best-effort query: return the maximum existing
     // sequence_id by scanning etcd keys under /oplog/{cluster_id}/ with
     // descending key order.
-    // Return ETCD_KEY_NOT_EXIST if no OpLog exists yet.
+    // Return OPLOG_ENTRY_NOT_FOUND if no OpLog exists yet.
     ErrorCode GetMaxSequenceId(uint64_t& sequence_id) override;
 
     /**
@@ -120,15 +121,15 @@ class EtcdOpLogStore : public OpLogStore {
      * @brief Get the sequence_id for a given snapshot.
      * @param snapshot_id: The snapshot ID.
      * @param sequence_id: Output param, the sequence_id.
-     * @return: Error code. ETCD_KEY_NOT_EXIST if snapshot not found.
+     * @return: Error code. OPLOG_ENTRY_NOT_FOUND if snapshot not found.
      */
     ErrorCode GetSnapshotSequenceId(const std::string& snapshot_id,
                                     uint64_t& sequence_id) override;
 
     /**
      * @brief Clean up OpLog entries before a given sequence_id.
-     * @param before_sequence_id: All entries with sequence_id < before_sequence_id
-     *                            will be deleted.
+     * @param before_sequence_id: All entries with sequence_id <
+     * before_sequence_id will be deleted.
      * @return: Error code.
      */
     ErrorCode CleanupOpLogBefore(uint64_t before_sequence_id) override;
@@ -199,15 +200,15 @@ class EtcdOpLogStore : public OpLogStore {
     std::chrono::steady_clock::time_point last_update_time_;
 
     // Batch update configuration
-    static constexpr size_t kBatchSize = 100;              // Update every 100 entries
-    static constexpr int kBatchIntervalMs = 1000;          // Or every 1 second
+    static constexpr size_t kBatchSize = 100;      // Update every 100 entries
+    static constexpr int kBatchIntervalMs = 1000;  // Or every 1 second
 
     // Group Commit / Batch Write support
     struct BatchEntry {
         std::string key;
         std::string value;
         uint64_t sequence_id;
-        bool is_sync; // Track if entry requires sync
+        bool is_sync;  // Track if entry requires sync
     };
 
     void BatchWriteThread();
@@ -222,12 +223,15 @@ class EtcdOpLogStore : public OpLogStore {
     std::atomic<uint64_t> last_persisted_seq_id_{0};
 
     // Configs for OpLog batching
-    static constexpr size_t kOpLogBatchSizeLimit = 1 * 1024 * 1024; // 1MB payload limit (soft)
-    static constexpr size_t kOpLogBatchCountLimit = 100;            // 100 entries
-    static constexpr int kOpLogBatchTimeoutMs = 10;                 // 10ms max latency for Async
-    static constexpr int kSyncWaitTimeoutMs = 3000;                 // 3s timeout for Sync writes
-    static constexpr int kFlushRetryCount = 3;                      // Retries for failed flush
-    static constexpr int kFlushRetryIntervalMs = 50;                // Retry interval
+    static constexpr size_t kOpLogBatchSizeLimit =
+        1 * 1024 * 1024;  // 1MB payload limit (soft)
+    static constexpr size_t kOpLogBatchCountLimit = 100;  // 100 entries
+    static constexpr int kOpLogBatchTimeoutMs =
+        10;  // 10ms max latency for Async
+    static constexpr int kSyncWaitTimeoutMs =
+        3000;                                   // 3s timeout for Sync writes
+    static constexpr int kFlushRetryCount = 3;  // Retries for failed flush
+    static constexpr int kFlushRetryIntervalMs = 50;  // Retry interval
 };
 
 }  // namespace mooncake

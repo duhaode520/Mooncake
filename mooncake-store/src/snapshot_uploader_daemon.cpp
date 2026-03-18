@@ -162,10 +162,10 @@ bool ProcessRequest(int client_fd) {
                 all_success = false;
                 break;
             }
-            if (file_size == 0 ||
-                file_size > kEtcdMaxValueSize ||
+            if (file_size == 0 || file_size > kEtcdMaxValueSize ||
                 file_size > std::numeric_limits<size_t>::max() ||
-                file_size > static_cast<uintmax_t>(std::numeric_limits<int>::max())) {
+                file_size >
+                    static_cast<uintmax_t>(std::numeric_limits<int>::max())) {
                 LOG(ERROR) << "[SnapshotDaemon] File size invalid: "
                            << file_path << ", size=" << file_size;
                 error_msg = "File size invalid: " + file_path;

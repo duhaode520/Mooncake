@@ -6,6 +6,7 @@
 #include <glog/logging.h>
 
 #include "config_helper.h"
+#include "oplog_store_factory.h"
 #include "serialize/serializer_backend.h"
 #include "types.h"
 
@@ -33,6 +34,11 @@ struct MasterConfig {
     std::string etcd_endpoints;
 
     std::string cluster_id;
+
+    // OpLog store configuration
+    std::string oplog_store_type;      // "etcd" or "localfs"
+    std::string oplog_store_root_dir;  // LocalFS OpLogStore root directory
+    int oplog_poll_interval_ms;        // Polling interval for ChangeNotifier
     std::string root_fs_dir;
     int64_t global_file_segment_size;
     std::string memory_allocator;
@@ -128,6 +134,10 @@ class MasterServiceSupervisorConfig {
     std::string cxl_path = DEFAULT_CXL_PATH;
     size_t cxl_size = DEFAULT_CXL_SIZE;
     bool enable_cxl = false;
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type = kDefaultOpLogStoreType;
+    std::string oplog_store_root_dir = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
     MasterServiceSupervisorConfig() = default;
 
     // From MasterConfig
@@ -180,6 +190,10 @@ class MasterServiceSupervisorConfig {
         // HA mode policy: force ETCD snapshot backend (ignore configured backend).
         // IMPORTANT: Do not parse the configured backend first, since it may
         // throw (e.g. S3 requested without AWS SDK). In HA mode we always use ETCD.
+        // HA mode policy: force ETCD snapshot backend (ignore configured
+        // backend). IMPORTANT: Do not parse the configured backend first, since
+        // it may throw (e.g. S3 requested without AWS SDK). In HA mode we
+        // always use ETCD.
         if (config.enable_ha) {
             snapshot_backend_type = SnapshotBackendType::ETCD;
         } else {
@@ -197,6 +211,9 @@ class MasterServiceSupervisorConfig {
         cxl_path = config.cxl_path;
         cxl_size = config.cxl_size;
         enable_cxl = config.enable_cxl;
+        oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
+        oplog_store_root_dir = config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
         validate();
     }
 
@@ -292,6 +309,11 @@ class WrappedMasterServiceConfig {
     bool enable_cxl = false;
     std::string etcd_endpoints = "0.0.0.0:2379";
 
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type = kDefaultOpLogStoreType;
+    std::string oplog_store_root_dir = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
+
     WrappedMasterServiceConfig() = default;
 
     // From MasterConfig
@@ -364,6 +386,10 @@ class WrappedMasterServiceConfig {
         cxl_path = config.cxl_path;
         cxl_size = config.cxl_size;
         enable_cxl = config.enable_cxl;
+
+        oplog_store_type = ParseOpLogStoreType(config.oplog_store_type);
+        oplog_store_root_dir = config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 
     // From MasterServiceSupervisorConfig, enable_ha is set to true
@@ -421,6 +447,10 @@ class WrappedMasterServiceConfig {
         cxl_path = config.cxl_path;
         cxl_size = config.cxl_size;
         enable_cxl = config.enable_cxl;
+
+        oplog_store_type = config.oplog_store_type;
+        oplog_store_root_dir = config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 };
 
@@ -472,6 +502,11 @@ class MasterServiceConfigBuilder {
     std::string cxl_path_ = DEFAULT_CXL_PATH;
     size_t cxl_size_ = DEFAULT_CXL_SIZE;
     bool enable_cxl_ = false;
+
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type_ = kDefaultOpLogStoreType;
+    std::string oplog_store_root_dir_ = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms_ = kDefaultOpLogPollIntervalMs;
 
    public:
     MasterServiceConfigBuilder() = default;
@@ -652,6 +687,19 @@ class MasterServiceConfigBuilder {
 
     MasterServiceConfigBuilder& set_enable_cxl(bool enable) {
         enable_cxl_ = enable;
+    MasterServiceConfigBuilder& set_oplog_store_type(OpLogStoreType type) {
+        oplog_store_type_ = type;
+        return *this;
+    }
+
+    MasterServiceConfigBuilder& set_oplog_store_root_dir(
+        const std::string& dir) {
+        oplog_store_root_dir_ = dir;
+        return *this;
+    }
+
+    MasterServiceConfigBuilder& set_oplog_poll_interval_ms(int ms) {
+        oplog_poll_interval_ms_ = ms;
         return *this;
     }
 
@@ -714,6 +762,10 @@ class MasterServiceConfig {
     std::string cxl_path = DEFAULT_CXL_PATH;
     size_t cxl_size = DEFAULT_CXL_SIZE;
     bool enable_cxl = false;
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type = kDefaultOpLogStoreType;
+    std::string oplog_store_root_dir = kDefaultOpLogRootDir;
+    int oplog_poll_interval_ms = kDefaultOpLogPollIntervalMs;
     MasterServiceConfig() = default;
 
     // From WrappedMasterServiceConfig
@@ -766,6 +818,10 @@ class MasterServiceConfig {
         cxl_path = config.cxl_path;
         cxl_size = config.cxl_size;
         enable_cxl = config.enable_cxl;
+
+        oplog_store_type = config.oplog_store_type;
+        oplog_store_root_dir = config.oplog_store_root_dir;
+        oplog_poll_interval_ms = config.oplog_poll_interval_ms;
     }
 
     // Static factory method to create a builder
@@ -817,6 +873,9 @@ inline MasterServiceConfig MasterServiceConfigBuilder::build() const {
     config.cxl_path = cxl_path_;
     config.cxl_size = cxl_size_;
     config.enable_cxl = enable_cxl_;
+    config.oplog_store_type = oplog_store_type_;
+    config.oplog_store_root_dir = oplog_store_root_dir_;
+    config.oplog_poll_interval_ms = oplog_poll_interval_ms_;
     return config;
 }
 

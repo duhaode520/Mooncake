@@ -182,6 +182,55 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
     }
 
     // Get msgpack snapshot directory path
+    bool UseEtcdSnapshotBackend() const {
+        return service_ != nullptr &&
+               service_->snapshot_backend_type_ == SnapshotBackendType::ETCD;
+    }
+
+    std::string GetEtcdSnapshotPrefix(const std::string& snapshot_id) const {
+        return "master_snapshot/" + snapshot_id + "/";
+    }
+
+    bool EnsureEtcdConnected() const {
+        if (!service_) {
+            LOG(ERROR) << "Service is null when ensuring etcd connection";
+            return false;
+        }
+        if (service_->etcd_endpoints_.empty()) {
+            LOG(ERROR) << "Etcd endpoints are empty in snapshot test";
+            return false;
+        }
+        auto result =
+            EtcdHelper::ConnectToEtcdStoreClient(service_->etcd_endpoints_);
+        if (result != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to connect to etcd endpoints: "
+                       << service_->etcd_endpoints_
+                       << ", error=" << static_cast<int>(result);
+            return false;
+        }
+        return true;
+    }
+
+    bool GetEtcdValue(const std::string& key, std::string& value) const {
+        EtcdRevisionId revision;
+        auto result = EtcdHelper::Get(key.c_str(), key.size(), value, revision);
+        if (result != ErrorCode::OK) {
+            LOG(ERROR) << "Etcd get failed for key: " << key
+                       << ", error=" << static_cast<int>(result);
+            return false;
+        }
+        return true;
+    }
+
+    bool StartSnapshotDaemonForTest() const {
+        if (!service_) {
+            LOG(ERROR) << "Service is null when starting snapshot daemon";
+            return false;
+        }
+        return service_->StartSnapshotDaemon();
+    }
+
+    // Get msgpack snapshot directory path or etcd key prefix
     std::string GetSnapshotDir(const std::string& snapshot_id) const {
         return tmp_dir() + "/mooncake_master_snapshot/" + snapshot_id + "/";
     }
@@ -604,6 +653,16 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
     // Copy msgpack snapshot files to backup directory
     void CopySnapshotToBackup(const std::string& snapshot_id,
                               const std::string& backup_id) const {
+    // Copy msgpack snapshot files to backup directory (or map backup id for
+    // etcd)
+    void CopySnapshotToBackup(const std::string& snapshot_id,
+                              const std::string& backup_id) const {
+        if (UseEtcdSnapshotBackend()) {
+            etcd_backup_id_map_[backup_id] = snapshot_id;
+            LOG(INFO) << "ETCD snapshot backup mapping: " << backup_id << " -> "
+                      << snapshot_id;
+            return;
+        }
         namespace fs = std::filesystem;
 
         fs::path src_dir = GetSnapshotDir(snapshot_id);
@@ -669,6 +728,8 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
     }
 
     // Compare all msgpack files in two snapshot directories
+    // Compare all msgpack files in two snapshot directories or etcd key
+    // prefixes
     bool CompareSnapshotDirectories(const std::string& dir1,
                                     const std::string& dir2) const {
         LOG(INFO) << "Comparing snapshot directories: " << dir1 << " vs "
@@ -691,6 +752,54 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
                 LOG(ERROR) << "Mismatch found in file: " << filename;
                 all_match = false;
                 break;
+        if (UseEtcdSnapshotBackend()) {
+            if (!EnsureEtcdConnected()) {
+                return false;
+            }
+            for (const auto& filename : files_to_compare) {
+                std::string key1 = dir1 + filename;
+                std::string key2 = dir2 + filename;
+
+                LOG(INFO) << "Comparing etcd key: " << filename;
+
+                std::string value1;
+                std::string value2;
+                if (!GetEtcdValue(key1, value1) ||
+                    !GetEtcdValue(key2, value2)) {
+                    LOG(ERROR)
+                        << "Failed to read etcd keys for file: " << filename;
+                    all_match = false;
+                    break;
+                }
+                if (value1.size() != value2.size()) {
+                    LOG(ERROR)
+                        << "Etcd value size differs for file: " << filename
+                        << ", size1=" << value1.size()
+                        << ", size2=" << value2.size();
+                    all_match = false;
+                    break;
+                }
+                if (value1 != value2) {
+                    LOG(ERROR)
+                        << "Etcd value content differs for file: " << filename;
+                    all_match = false;
+                    break;
+                }
+                file_count++;
+            }
+        } else {
+            for (const auto& filename : files_to_compare) {
+                std::string file1 = dir1 + filename;
+                std::string file2 = dir2 + filename;
+
+                LOG(INFO) << "Comparing file: " << filename;
+
+                if (!CompareBinaryFiles(file1, file2)) {
+                    LOG(ERROR) << "Mismatch found in file: " << filename;
+                    all_match = false;
+                    break;
+                }
+                file_count++;
             }
             file_count++;
         }

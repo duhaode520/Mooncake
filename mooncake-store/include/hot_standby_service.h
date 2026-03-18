@@ -16,6 +16,7 @@
 #include "oplog_change_notifier.h"
 #include "oplog_manager.h"
 #include "oplog_store.h"
+#include "oplog_store_factory.h"
 #include "oplog_replicator.h"
 #include "snapshot_provider.h"
 #include "standby_state_machine.h"
@@ -43,6 +44,11 @@ struct HotStandbyConfig {
     // If provided, Standby will try to load a snapshot first, then replay OpLog
     // from snapshot_sequence_id.
     bool enable_snapshot_bootstrap{false};
+
+    // OpLog store configuration
+    OpLogStoreType oplog_store_type{kDefaultOpLogStoreType};
+    std::string oplog_store_root_dir{kDefaultOpLogRootDir};
+    int oplog_poll_interval_ms{kDefaultOpLogPollIntervalMs};
 };
 
 /**
@@ -78,7 +84,8 @@ class HotStandbyService {
 
     /**
      * @brief Start connecting to Primary and begin replication
-     * @param primary_address Address of the Primary Master (not used with etcd-based sync)
+     * @param primary_address Address of the Primary Master (not used with
+     * etcd-based sync)
      * @param etcd_endpoints Comma-separated etcd endpoints
      * @param cluster_id Cluster identifier for OpLog path
      * @return ErrorCode::OK on success
@@ -122,10 +129,10 @@ class HotStandbyService {
 
     /**
      * @brief Get the latest applied sequence ID after promotion
-     * 
+     *
      * This should be called after Promote() to get the sequence_id
      * that the new Primary's OpLogManager should start from.
-     * 
+     *
      * @return Latest applied sequence ID, or 0 if not available
      */
     uint64_t GetLatestAppliedSequenceId() const;
@@ -147,7 +154,9 @@ class HotStandbyService {
     /**
      * @brief Get state machine for monitoring/debugging
      */
-    const StandbyStateMachine& GetStateMachine() const { return state_machine_; }
+    const StandbyStateMachine& GetStateMachine() const {
+        return state_machine_;
+    }
 
     /**
      * @brief Callback for OpLogReplicator state changes
@@ -207,7 +216,8 @@ class HotStandbyService {
 
         // Snapshot for promotion/restore.
         void Snapshot(
-            std::vector<std::pair<std::string, StandbyObjectMetadata>>& out) const;
+            std::vector<std::pair<std::string, StandbyObjectMetadata>>& out)
+            const;
 
        private:
         mutable std::mutex mutex_;
@@ -247,4 +257,3 @@ class HotStandbyService {
 };
 
 }  // namespace mooncake
-

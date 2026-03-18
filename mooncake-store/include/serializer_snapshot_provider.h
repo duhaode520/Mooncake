@@ -18,15 +18,16 @@ namespace mooncake {
 // (and parses manifest[9] as oplog_seq_id when present)
 class SerializerBackendSnapshotProvider final : public SnapshotProvider {
    public:
-    SerializerBackendSnapshotProvider(SnapshotBackendType backend_type,
-                                     const std::string& etcd_endpoints,
-                                                 BufferAllocatorType memory_allocator_type = BufferAllocatorType::OFFSET,
-                                     std::string snapshot_root = "master_snapshot");
+    SerializerBackendSnapshotProvider(
+        SnapshotBackendType backend_type, const std::string& etcd_endpoints,
+        BufferAllocatorType memory_allocator_type = BufferAllocatorType::OFFSET,
+        std::string snapshot_root = "master_snapshot");
 
     bool LoadLatestSnapshot(
         const std::string& cluster_id, std::string& snapshot_id,
         uint64_t& snapshot_sequence_id,
-        std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot) override;
+        std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot)
+        override;
 
    private:
     std::string snapshot_root_;

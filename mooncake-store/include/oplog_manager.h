@@ -24,21 +24,24 @@ enum class OpType : uint8_t {
     PUT_REVOKE = 2,
     REMOVE = 3,
     // Deprecated: LEASE_RENEW is intentionally not recorded in OpLog in the
-    // current etcd-based hot-standby design (Standby relies on Primary DELETE operations).
+    // current etcd-based hot-standby design (Standby relies on Primary DELETE
+    // operations).
     LEASE_RENEW = 4,
 };
 
 // A single operation log entry.
-// Note: Payload contains JSON serialized MetadataPayload (defined in metadata_store.h)
-// for PUT_END operations, allowing Standby to restore complete metadata.
+// Note: Payload contains JSON serialized MetadataPayload (defined in
+// metadata_store.h) for PUT_END operations, allowing Standby to restore
+// complete metadata.
 struct OpLogEntry {
-    uint64_t sequence_id{0};     // Monotonically increasing global sequence
-    uint64_t timestamp_ms{0};    // Logical timestamp in milliseconds
+    uint64_t sequence_id{0};   // Monotonically increasing global sequence
+    uint64_t timestamp_ms{0};  // Logical timestamp in milliseconds
     OpType op_type{OpType::PUT_END};
-    std::string object_key;      // Target object key
-    std::string payload;         // Serialized extra data (optional)
-    uint32_t checksum{0};        // Checksum of payload (implementation-defined)
-    uint32_t prefix_hash{0};     // Hash of the entire key (for verification and optimization)
+    std::string object_key;  // Target object key
+    std::string payload;     // Serialized extra data (optional)
+    uint32_t checksum{0};    // Checksum of payload (implementation-defined)
+    uint32_t prefix_hash{
+        0};  // Hash of the entire key (for verification and optimization)
 };
 
 /**
@@ -46,7 +49,8 @@ struct OpLogEntry {
  *
  * This class is intentionally simple: it keeps a bounded deque of OpLogEntry
  * and provides append / get-since primitives. It can later be extended to
- * or to spill to disk if needed. In the new etcd-based design, OpLog will be written to etcd.
+ * or to spill to disk if needed. In the new etcd-based design, OpLog will be
+ * written to etcd.
  */
 class OpLogManager {
    public:
@@ -98,7 +102,8 @@ class OpLogManager {
     uint64_t GetLastSequenceId() const;
 
     // Set the initial sequence ID (used when promoting Standby to Primary).
-    // This ensures the new Primary's OpLogManager continues from the correct sequence_id.
+    // This ensures the new Primary's OpLogManager continues from the correct
+    // sequence_id.
     void SetInitialSequenceId(uint64_t sequence_id);
 
     // Current number of entries in the buffer.
@@ -113,10 +118,11 @@ class OpLogManager {
     // This is public so OpLogReplicator and OpLogApplier can validate entries.
     static bool VerifyChecksum(const OpLogEntry& entry);
 
-    // Basic DoS protection for externally sourced OpLog entries (etcd watch / reads).
-    // Enforce conservative bounds on key/payload sizes before parsing/applying.
-    static constexpr size_t kMaxObjectKeySize = 4096;                 // 4 KiB
-    static constexpr size_t kMaxPayloadSize = 10 * 1024 * 1024;       // 10 MiB
+    // Basic DoS protection for externally sourced OpLog entries (etcd watch /
+    // reads). Enforce conservative bounds on key/payload sizes before
+    // parsing/applying.
+    static constexpr size_t kMaxObjectKeySize = 4096;            // 4 KiB
+    static constexpr size_t kMaxPayloadSize = 10 * 1024 * 1024;  // 10 MiB
 
     // Validate OpLogEntry key/payload sizes. If invalid, returns false and
     // optionally sets a human-readable reason.
@@ -130,12 +136,13 @@ class OpLogManager {
 
     mutable std::shared_mutex mutex_;
     std::deque<OpLogEntry> buffer_;
-    uint64_t first_seq_id_{1};   // sequence_id of buffer_.front()
-    uint64_t last_seq_id_{0};    // last assigned sequence_id
-    
+    uint64_t first_seq_id_{1};  // sequence_id of buffer_.front()
+    uint64_t last_seq_id_{0};   // last assigned sequence_id
+
     // Note: We removed key_sequence_map_ and key_remove_time_map_.
     // Global sequence_id is sufficient for ordering guarantee.
-    // All operations are applied in sequence_id order, which ensures consistency.
+    // All operations are applied in sequence_id order, which ensures
+    // consistency.
 
     // Optional OpLog store for persistent storage
     std::shared_ptr<OpLogStore> oplog_store_;
@@ -145,5 +152,3 @@ class OpLogManager {
 };
 
 }  // namespace mooncake
-
-

@@ -30,11 +30,11 @@ EtcdOpLogChangeNotifier::EtcdOpLogChangeNotifier(const std::string& cluster_id,
 
 EtcdOpLogChangeNotifier::~EtcdOpLogChangeNotifier() {
     Stop();
-    // If Stop() returned early (Change Notifier was never started), callback_ctx_
-    // was never freed.  It is safe to delete here because no goroutine / watch
-    // thread was ever launched, so no callbacks can be in-flight.
-    // In all other paths, Stop() already sets callback_ctx_ to nullptr,
-    // so `delete nullptr` is a harmless no-op.
+    // If Stop() returned early (Change Notifier was never started),
+    // callback_ctx_ was never freed.  It is safe to delete here because no
+    // goroutine / watch thread was ever launched, so no callbacks can be
+    // in-flight. In all other paths, Stop() already sets callback_ctx_ to
+    // nullptr, so `delete nullptr` is a harmless no-op.
     delete callback_ctx_;
     callback_ctx_ = nullptr;
 }
@@ -173,8 +173,8 @@ void EtcdOpLogChangeNotifier::WatchLoop() {
         EtcdRevisionId start_rev =
             static_cast<EtcdRevisionId>(next_watch_revision_.load());
         ErrorCode err = EtcdHelper::WatchWithPrefixFromRevision(
-            watch_prefix_.c_str(), watch_prefix_.size(), start_rev, callback_ctx_,
-            WatchCallback);
+            watch_prefix_.c_str(), watch_prefix_.size(), start_rev,
+            callback_ctx_, WatchCallback);
 
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Failed to start watch for prefix " << watch_prefix_

@@ -39,7 +39,7 @@ class MockOpLogStore : public OpLogStore {
         }
         auto it = entries_.find(sequence_id);
         if (it == entries_.end()) {
-            return ErrorCode::ETCD_KEY_NOT_EXIST;
+            return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
         }
         entry = it->second;
         return ErrorCode::OK;
@@ -70,7 +70,7 @@ class MockOpLogStore : public OpLogStore {
     ErrorCode GetMaxSequenceId(uint64_t& sequence_id) override {
         std::lock_guard<std::mutex> lock(mutex_);
         if (entries_.empty()) {
-            return ErrorCode::ETCD_KEY_NOT_EXIST;
+            return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
         }
         sequence_id = entries_.rbegin()->first;
         return ErrorCode::OK;
@@ -94,7 +94,7 @@ class MockOpLogStore : public OpLogStore {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = snapshots_.find(snapshot_id);
         if (it == snapshots_.end()) {
-            return ErrorCode::ETCD_KEY_NOT_EXIST;
+            return ErrorCode::OPLOG_ENTRY_NOT_FOUND;
         }
         sequence_id = it->second;
         return ErrorCode::OK;

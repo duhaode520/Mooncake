@@ -77,7 +77,7 @@ class EtcdOpLogChangeNotifier : public OpLogChangeNotifier {
     int64_t DeliverHistoricalEntries(uint64_t start_seq_id);
 
     std::string cluster_id_;
-    std::string watch_prefix_;  // "/oplog/{cluster_id}/"
+    std::string watch_prefix_;     // "/oplog/{cluster_id}/"
     EtcdOpLogStore* oplog_store_;  // Not owned
 
     EntryCallback on_entry_;

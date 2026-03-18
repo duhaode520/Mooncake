@@ -23,7 +23,8 @@ namespace mooncake::test {
 // Minimal MetadataStore implementation for OpLogApplier
 class MinimalMockMetadataStore : public MetadataStore {
    public:
-    bool PutMetadata(const std::string&, const StandbyObjectMetadata&) override {
+    bool PutMetadata(const std::string&,
+                     const StandbyObjectMetadata&) override {
         return true;
     }
     bool Put(const std::string&, const std::string&) override { return true; }
@@ -74,9 +75,11 @@ OpLogEntry MakeEntry(uint64_t seq, OpType type, const std::string& key,
     e.op_type = type;
     e.object_key = key;
     e.payload = payload;
-    e.checksum = static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
-    e.prefix_hash = key.empty() ? 0
-                                 : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
+    e.checksum =
+        static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
+    e.prefix_hash =
+        key.empty() ? 0
+                    : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
     return e;
 }
 
@@ -175,4 +178,3 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-

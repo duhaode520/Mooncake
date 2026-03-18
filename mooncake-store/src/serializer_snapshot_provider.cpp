@@ -97,20 +97,20 @@ std::optional<LatestSnapshotCandidate> ParseLatestSnapshot(
 
 SerializerBackendSnapshotProvider::SerializerBackendSnapshotProvider(
     SnapshotBackendType backend_type, const std::string& etcd_endpoints,
-        BufferAllocatorType memory_allocator_type,
-    std::string snapshot_root)
-        : snapshot_root_(std::move(snapshot_root)),
-            backend_type_(backend_type),
-            etcd_endpoints_(etcd_endpoints),
-            memory_allocator_type_(memory_allocator_type) {
-        backend_ = SerializerBackend::Create(backend_type_, etcd_endpoints_);
+    BufferAllocatorType memory_allocator_type, std::string snapshot_root)
+    : snapshot_root_(std::move(snapshot_root)),
+      backend_type_(backend_type),
+      etcd_endpoints_(etcd_endpoints),
+      memory_allocator_type_(memory_allocator_type) {
+    backend_ = SerializerBackend::Create(backend_type_, etcd_endpoints_);
 }
 
 bool SerializerBackendSnapshotProvider::LoadLatestSnapshot(
     const std::string& cluster_id, std::string& snapshot_id,
     uint64_t& snapshot_sequence_id,
     std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot) {
-    // Current MasterService snapshot layout is global (not namespaced by cluster_id).
+    // Current MasterService snapshot layout is global (not namespaced by
+    // cluster_id).
     (void)cluster_id;
 
     // 1) Resolve latest snapshot id
@@ -124,8 +124,8 @@ bool SerializerBackendSnapshotProvider::LoadLatestSnapshot(
 
     auto latest = ParseLatestSnapshot(latest_content);
     if (!latest.has_value() || latest->snapshot_id.empty()) {
-        LOG(WARNING)
-            << "[Standby] latest.txt is present but no valid snapshot id parsed";
+        LOG(WARNING) << "[Standby] latest.txt is present but no valid snapshot "
+                        "id parsed";
         return false;
     }
 
@@ -153,8 +153,10 @@ bool SerializerBackendSnapshotProvider::LoadLatestSnapshot(
     cfg.memory_allocator = memory_allocator_type_;
     cfg.snapshot_backup_dir = "/tmp/mooncake_standby_restore";
 
-    LOG(INFO) << "[Standby] Snapshot bootstrap: restoring via MasterService::RestoreState, "
-                 "backend=" << SnapshotBackendTypeToString(backend_type_)
+    LOG(INFO) << "[Standby] Snapshot bootstrap: restoring via "
+                 "MasterService::RestoreState, "
+                 "backend="
+              << SnapshotBackendTypeToString(backend_type_)
               << ", snapshot_root=" << snapshot_root_;
 
     bool restored = false;
@@ -170,16 +172,19 @@ bool SerializerBackendSnapshotProvider::LoadLatestSnapshot(
     }
 
     if (!restored) {
-        LOG(WARNING) << "[Standby] Snapshot restore failed in MasterService::RestoreState";
+        LOG(WARNING) << "[Standby] Snapshot restore failed in "
+                        "MasterService::RestoreState";
         return false;
     }
 
     if (snapshot.empty()) {
-        LOG(INFO) << "[Standby] Snapshot restore succeeded but exported snapshot is empty";
+        LOG(INFO) << "[Standby] Snapshot restore succeeded but exported "
+                     "snapshot is empty";
     }
     LOG(INFO) << "[Standby] Snapshot load complete via RestoreState: keys="
               << snapshot.size() << ", sequence_id=" << snapshot_sequence_id;
-    // Even if there are no keys, the snapshot boundary (sequence_id) still matters.
+    // Even if there are no keys, the snapshot boundary (sequence_id) still
+    // matters.
     return true;
 }
 

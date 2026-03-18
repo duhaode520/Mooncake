@@ -13,65 +13,15 @@
 #include <xxhash.h>
 
 #include "metadata_store.h"
+#include "mock_metadata_store.h"
 #include "mock_oplog_store.h"
 #include "oplog_manager.h"
 #include "types.h"
 
+using mooncake::test::MockMetadataStore;
 using mooncake::test::MockOpLogStore;
 
 namespace mooncake::test {
-
-// Mock MetadataStore for testing OpLogApplier
-class MockMetadataStore : public MetadataStore {
-   public:
-    MockMetadataStore() = default;
-    ~MockMetadataStore() override = default;
-
-    bool PutMetadata(const std::string& key,
-                     const StandbyObjectMetadata& metadata) override {
-        metadata_map_[key] = metadata;
-        return true;
-    }
-
-    bool Put(const std::string& key, const std::string& payload) override {
-        // For testing, we can use PutMetadata with empty metadata
-        StandbyObjectMetadata meta;
-        metadata_map_[key] = meta;
-        return true;
-    }
-
-    std::optional<StandbyObjectMetadata> GetMetadata(
-        const std::string& key) const override {
-        auto it = metadata_map_.find(key);
-        if (it != metadata_map_.end()) {
-            return it->second;
-        }
-        return std::nullopt;
-    }
-
-    bool Remove(const std::string& key) override {
-        auto it = metadata_map_.find(key);
-        if (it != metadata_map_.end()) {
-            metadata_map_.erase(it);
-            return true;
-        }
-        return false;
-    }
-
-    bool Exists(const std::string& key) const override {
-        return metadata_map_.find(key) != metadata_map_.end();
-    }
-
-    size_t GetKeyCount() const override { return metadata_map_.size(); }
-
-    // Test helper methods
-    void Clear() { metadata_map_.clear(); }
-
-    size_t Size() const { return metadata_map_.size(); }
-
-   private:
-    std::map<std::string, StandbyObjectMetadata> metadata_map_;
-};
 
 // Helper function to create a valid OpLogEntry with checksum
 // Uses the same checksum algorithm as OpLogManager (XXH32)
@@ -86,10 +36,11 @@ OpLogEntry MakeEntry(uint64_t seq, OpType type, const std::string& key,
     e.object_key = key;
     e.payload = payload;
     // Compute checksum and prefix_hash using the same algorithm as OpLogManager
-    e.checksum = static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
-    e.prefix_hash = key.empty() ? 0
-                                 : static_cast<uint32_t>(
-                                       XXH32(key.data(), key.size(), 0));
+    e.checksum =
+        static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
+    e.prefix_hash =
+        key.empty() ? 0
+                    : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
     return e;
 }
 
@@ -164,7 +115,8 @@ TEST_F(OpLogApplierTest, TestApplyRemove) {
 }
 
 TEST_F(OpLogApplierTest, TestApplyOpLogEntry_InvalidOpType) {
-    OpLogEntry entry = MakeEntry(1, OpType::PUT_END, "key1", MakeValidPayload());
+    OpLogEntry entry =
+        MakeEntry(1, OpType::PUT_END, "key1", MakeValidPayload());
     // Manually set an invalid op_type (assuming OpType is an enum)
     // Since we can't directly set invalid enum, we test with valid types
     // and verify that unsupported types in ProcessPendingEntries are handled
@@ -204,11 +156,13 @@ TEST_F(OpLogApplierTest, TestApplyOutOfOrder) {
 
     // Apply entry3 (seq=3) - should be cached (out of order)
     EXPECT_FALSE(applier_->ApplyOpLogEntry(entry3));
-    EXPECT_EQ(2u, applier_->GetExpectedSequenceId());  // Still waiting for seq=2
+    EXPECT_EQ(2u,
+              applier_->GetExpectedSequenceId());  // Still waiting for seq=2
     EXPECT_FALSE(mock_metadata_store_->Exists("key3"));
 
     // Apply entry2 (seq=2) - should succeed and trigger processing of entry3
-    // ApplyOpLogEntry internally calls ProcessPendingEntries(), so entry3 should be processed
+    // ApplyOpLogEntry internally calls ProcessPendingEntries(), so entry3
+    // should be processed
     EXPECT_TRUE(applier_->ApplyOpLogEntry(entry2));
     EXPECT_EQ(4u, applier_->GetExpectedSequenceId());  // Now at seq=4
 
@@ -216,7 +170,7 @@ TEST_F(OpLogApplierTest, TestApplyOutOfOrder) {
     EXPECT_TRUE(mock_metadata_store_->Exists("key1"));
     EXPECT_TRUE(mock_metadata_store_->Exists("key2"));
     EXPECT_TRUE(mock_metadata_store_->Exists("key3"));
-    
+
     // ProcessPendingEntries may return 0 if entry3 was already processed
     (void)applier_->ProcessPendingEntries();
     EXPECT_EQ(4u, applier_->GetExpectedSequenceId());
@@ -233,7 +187,8 @@ TEST_F(OpLogApplierTest, TestApplyWithGap) {
 
     // Apply entry4 (seq=4) - gap at seq=2,3
     EXPECT_FALSE(applier_->ApplyOpLogEntry(entry4));
-    EXPECT_EQ(2u, applier_->GetExpectedSequenceId());  // Still waiting for seq=2
+    EXPECT_EQ(2u,
+              applier_->GetExpectedSequenceId());  // Still waiting for seq=2
 
     // Process pending entries - should detect gap and schedule wait
     (void)applier_->ProcessPendingEntries();
@@ -456,8 +411,8 @@ TEST_F(OpLogApplierTest, TestRecover_AfterGap) {
 
     // Now entry3 should be processable
     (void)applier_->ProcessPendingEntries();
-    // entry3 should be in pending, but expected_seq is now 4, so it won't be processed
-    // This tests that recovery resets the expected sequence
+    // entry3 should be in pending, but expected_seq is now 4, so it won't be
+    // processed This tests that recovery resets the expected sequence
 }
 
 // ========== 4.1.7 Pending entries tests ==========
@@ -481,7 +436,8 @@ TEST_F(OpLogApplierTest, TestProcessPendingEntries) {
     EXPECT_EQ(0u, processed1);
     EXPECT_EQ(2u, applier_->GetExpectedSequenceId());
 
-    // Apply entry2 - this will internally call ProcessPendingEntries() and process entry3
+    // Apply entry2 - this will internally call ProcessPendingEntries() and
+    // process entry3
     EXPECT_TRUE(applier_->ApplyOpLogEntry(entry2));
     EXPECT_EQ(4u, applier_->GetExpectedSequenceId());
 
@@ -489,7 +445,7 @@ TEST_F(OpLogApplierTest, TestProcessPendingEntries) {
     EXPECT_TRUE(mock_metadata_store_->Exists("key1"));
     EXPECT_TRUE(mock_metadata_store_->Exists("key2"));
     EXPECT_TRUE(mock_metadata_store_->Exists("key3"));
-    
+
     // ProcessPendingEntries may return 0 if entry3 was already processed
     (void)applier_->ProcessPendingEntries();
     EXPECT_EQ(4u, applier_->GetExpectedSequenceId());
@@ -519,7 +475,8 @@ TEST_F(OpLogApplierTest, TestPendingEntriesTimeout) {
     }
 
     // After timeout, gap should be skipped and entry3 should be processed
-    // Note: This test may be flaky due to timing, but it tests the timeout logic
+    // Note: This test may be flaky due to timing, but it tests the timeout
+    // logic
     EXPECT_GE(applier_->GetExpectedSequenceId(), 2u);
 }
 
@@ -621,20 +578,23 @@ TEST_F(OpLogApplierTest, TestApplyOpLogEntries_WithGaps) {
     std::string payload = MakeValidPayload();
     std::vector<OpLogEntry> entries;
     entries.push_back(MakeEntry(1, OpType::PUT_END, "key1", payload));
-    entries.push_back(MakeEntry(3, OpType::PUT_END, "key3", payload));  // Gap at seq=2
+    entries.push_back(
+        MakeEntry(3, OpType::PUT_END, "key3", payload));  // Gap at seq=2
     entries.push_back(MakeEntry(2, OpType::PUT_END, "key2", payload));
 
     size_t applied = applier_->ApplyOpLogEntries(entries);
-    // entry1 should be applied, entry3 should be pending, entry2 should be applied and trigger processing of entry3
+    // entry1 should be applied, entry3 should be pending, entry2 should be
+    // applied and trigger processing of entry3
     EXPECT_GE(applied, 2u);  // entry1 and entry2 are applied
     EXPECT_LE(applied, 3u);
 
-    // entry2's ApplyOpLogEntry internally calls ProcessPendingEntries(), so entry3 should be processed
+    // entry2's ApplyOpLogEntry internally calls ProcessPendingEntries(), so
+    // entry3 should be processed
     EXPECT_GE(applier_->GetExpectedSequenceId(), 4u);
     EXPECT_TRUE(mock_metadata_store_->Exists("key1"));
     EXPECT_TRUE(mock_metadata_store_->Exists("key2"));
     EXPECT_TRUE(mock_metadata_store_->Exists("key3"));
-    
+
     // ProcessPendingEntries may return 0 if entry3 was already processed
     (void)applier_->ProcessPendingEntries();
     EXPECT_GE(applier_->GetExpectedSequenceId(), 4u);
@@ -660,4 +620,3 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-

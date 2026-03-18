@@ -1,6 +1,7 @@
 // mooncake-store/include/oplog_store_factory.h
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -15,14 +16,51 @@ enum class OpLogStoreRole {
 
 enum class OpLogStoreType {
     ETCD,
-    // Future: HDFS, S3, LOCAL_FS, ...
+    LOCAL_FS,
 };
+
+#ifdef STORE_USE_ETCD
+static constexpr OpLogStoreType kDefaultOpLogStoreType = OpLogStoreType::ETCD;
+#else
+static constexpr OpLogStoreType kDefaultOpLogStoreType =
+    OpLogStoreType::LOCAL_FS;
+#endif
+
+// Parse string to OpLogStoreType (case-insensitive).
+// Parse string to OpLogStoreType (case-insensitive).
+// Returns kDefaultOpLogStoreType for unrecognized strings.
+inline OpLogStoreType ParseOpLogStoreType(const std::string& type_str) {
+    std::string lower = type_str;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "localfs" || lower == "local_fs") {
+        return OpLogStoreType::LOCAL_FS;
+    }
+    if (lower == "etcd") {
+        return OpLogStoreType::ETCD;
+    }
+    return kDefaultOpLogStoreType;
+}
+
+inline std::string OpLogStoreTypeToString(OpLogStoreType type) {
+    switch (type) {
+        case OpLogStoreType::LOCAL_FS:
+            return "localfs";
+        case OpLogStoreType::ETCD:
+        default:
+            return "etcd";
+    }
+}
+
+// Default configuration values for LocalFS OpLog store
+static constexpr const char* kDefaultOpLogRootDir = "/tmp/mooncake_oplog";
+static constexpr int kDefaultOpLogPollIntervalMs = 1000;
 
 class OpLogStoreFactory {
    public:
-    static std::unique_ptr<OpLogStore> Create(OpLogStoreType type,
-                                              const std::string& cluster_id,
-                                              OpLogStoreRole role);
+    static std::unique_ptr<OpLogStore> Create(
+        OpLogStoreType type, const std::string& cluster_id, OpLogStoreRole role,
+        const std::string& oplog_root_dir = kDefaultOpLogRootDir,
+        int poll_interval_ms = kDefaultOpLogPollIntervalMs);
 };
 
 }  // namespace mooncake

@@ -34,8 +34,8 @@ class MasterViewHelper {
     explicit MasterViewHelper(const std::string& cluster_id = std::string());
 
     // Update cluster_id (and derived master_view_key_) before using the helper.
-    // This is mainly for client-side etcd:// usage where cluster_id may be passed
-    // via connection string.
+    // This is mainly for client-side etcd:// usage where cluster_id may be
+    // passed via connection string.
     void SetClusterId(const std::string& cluster_id);
 
     const std::string& GetMasterViewKey() const { return master_view_key_; }

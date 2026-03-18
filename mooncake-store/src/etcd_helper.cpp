@@ -230,22 +230,23 @@ ErrorCode EtcdHelper::Create(const char* key, const size_t key_size,
     return ErrorCode::OK;
 }
 
-ErrorCode EtcdHelper::GetWithPrefix(const char* prefix, const size_t prefix_size,
-                                     std::vector<std::string>& keys,
-                                     std::vector<std::string>& values) {
-    // TODO: Implement GetWithPrefix - need to simplify Go wrapper interface first
-    // For now, return error as this requires complex memory management
-    LOG(ERROR) << "GetWithPrefix not yet implemented - requires Go wrapper interface simplification";
+ErrorCode EtcdHelper::GetWithPrefix(const char* prefix,
+                                    const size_t prefix_size,
+                                    std::vector<std::string>& keys,
+                                    std::vector<std::string>& values) {
+    // TODO: Implement GetWithPrefix - need to simplify Go wrapper interface
+    // first For now, return error as this requires complex memory management
+    LOG(ERROR) << "GetWithPrefix not yet implemented - requires Go wrapper "
+                  "interface simplification";
     return ErrorCode::INTERNAL_ERROR;
 }
 
 ErrorCode EtcdHelper::GetRangeAsJson(const char* start_key,
-                                    const size_t start_key_size,
-                                    const char* end_key,
-                                    const size_t end_key_size,
-                                    size_t limit,
-                                    std::string& json,
-                                    EtcdRevisionId& revision_id) {
+                                     const size_t start_key_size,
+                                     const char* end_key,
+                                     const size_t end_key_size, size_t limit,
+                                     std::string& json,
+                                     EtcdRevisionId& revision_id) {
     char* err_msg = nullptr;
     char* json_ptr = nullptr;
     int json_size = 0;
@@ -267,8 +268,8 @@ ErrorCode EtcdHelper::GetRangeAsJson(const char* start_key,
 }
 
 ErrorCode EtcdHelper::GetFirstKeyWithPrefix(const char* prefix,
-                                             const size_t prefix_size,
-                                             std::string& first_key) {
+                                            const size_t prefix_size,
+                                            std::string& first_key) {
     char* err_msg = nullptr;
     char* first_key_ptr = nullptr;
     int first_key_size = 0;
@@ -315,9 +316,9 @@ ErrorCode EtcdHelper::GetLastKeyWithPrefix(const char* prefix,
 }
 
 ErrorCode EtcdHelper::DeleteRange(const char* start_key,
-                                   const size_t start_key_size,
-                                   const char* end_key,
-                                   const size_t end_key_size) {
+                                  const size_t start_key_size,
+                                  const char* end_key,
+                                  const size_t end_key_size) {
     char* err_msg = nullptr;
     int ret = EtcdStoreDeleteRangeWrapper(
         const_cast<char*>(start_key), (int)start_key_size,
@@ -353,7 +354,7 @@ ErrorCode EtcdHelper::WatchWithPrefixFromRevision(
 }
 
 ErrorCode EtcdHelper::CancelWatchWithPrefix(const char* prefix,
-                                             const size_t prefix_size) {
+                                            const size_t prefix_size) {
     char* err_msg = nullptr;
     int ret = EtcdStoreCancelWatchWithPrefixWrapper(const_cast<char*>(prefix),
                                                     (int)prefix_size, &err_msg);
@@ -367,8 +368,8 @@ ErrorCode EtcdHelper::CancelWatchWithPrefix(const char* prefix,
 }
 
 ErrorCode EtcdHelper::WaitWatchWithPrefixStopped(const char* prefix,
-                                                const size_t prefix_size,
-                                                int timeout_ms) {
+                                                 const size_t prefix_size,
+                                                 int timeout_ms) {
     char* err_msg = nullptr;
     int ret = EtcdStoreWaitWatchWithPrefixStoppedWrapper(
         const_cast<char*>(prefix), (int)prefix_size, timeout_ms, &err_msg);
@@ -401,12 +402,6 @@ ErrorCode EtcdHelper::CreateWithLease(const char* key, const size_t key_size,
                                       const size_t value_size,
                                       EtcdLeaseId lease_id,
                                       EtcdRevisionId& revision_id) {
-    LOG(FATAL) << "Etcd is not enabled in compilation";
-    return ErrorCode::ETCD_OPERATION_ERROR;
-}
-
-ErrorCode EtcdHelper::BatchCreate(const std::vector<std::string>& keys,
-                                  const std::vector<std::string>& values) {
     LOG(FATAL) << "Etcd is not enabled in compilation";
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
@@ -461,20 +456,20 @@ ErrorCode EtcdHelper::Create(const char* key, const size_t key_size,
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
 
-ErrorCode EtcdHelper::GetWithPrefix(const char* prefix, const size_t prefix_size,
-                                     std::vector<std::string>& keys,
-                                     std::vector<std::string>& values) {
+ErrorCode EtcdHelper::GetWithPrefix(const char* prefix,
+                                    const size_t prefix_size,
+                                    std::vector<std::string>& keys,
+                                    std::vector<std::string>& values) {
     LOG(FATAL) << "Etcd is not enabled in compilation";
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
 
 ErrorCode EtcdHelper::GetRangeAsJson(const char* start_key,
-                                    const size_t start_key_size,
-                                    const char* end_key,
-                                    const size_t end_key_size,
-                                    size_t limit,
-                                    std::string& json,
-                                    EtcdRevisionId& revision_id) {
+                                     const size_t start_key_size,
+                                     const char* end_key,
+                                     const size_t end_key_size, size_t limit,
+                                     std::string& json,
+                                     EtcdRevisionId& revision_id) {
     (void)start_key;
     (void)start_key_size;
     (void)end_key;
@@ -486,8 +481,8 @@ ErrorCode EtcdHelper::GetRangeAsJson(const char* start_key,
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
 ErrorCode EtcdHelper::GetFirstKeyWithPrefix(const char* prefix,
-                                             const size_t prefix_size,
-                                             std::string& first_key) {
+                                            const size_t prefix_size,
+                                            std::string& first_key) {
     LOG(FATAL) << "Etcd is not enabled in compilation";
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
@@ -503,9 +498,9 @@ ErrorCode EtcdHelper::GetLastKeyWithPrefix(const char* prefix,
 }
 
 ErrorCode EtcdHelper::DeleteRange(const char* start_key,
-                                   const size_t start_key_size,
-                                   const char* end_key,
-                                   const size_t end_key_size) {
+                                  const size_t start_key_size,
+                                  const char* end_key,
+                                  const size_t end_key_size) {
     LOG(FATAL) << "Etcd is not enabled in compilation";
     return ErrorCode::ETCD_OPERATION_ERROR;
 }
@@ -525,7 +520,7 @@ ErrorCode EtcdHelper::WatchWithPrefixFromRevision(
 }
 
 ErrorCode EtcdHelper::CancelWatchWithPrefix(const char* prefix,
-                                             const size_t prefix_size) {
+                                            const size_t prefix_size) {
     (void)prefix;
     (void)prefix_size;
     LOG(FATAL) << "Etcd is not enabled in compilation";
@@ -533,8 +528,8 @@ ErrorCode EtcdHelper::CancelWatchWithPrefix(const char* prefix,
 }
 
 ErrorCode EtcdHelper::WaitWatchWithPrefixStopped(const char* prefix,
-                                                const size_t prefix_size,
-                                                int timeout_ms) {
+                                                 const size_t prefix_size,
+                                                 int timeout_ms) {
     (void)prefix;
     (void)prefix_size;
     (void)timeout_ms;

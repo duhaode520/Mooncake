@@ -85,4 +85,3 @@ class OpLogReplicator {
 };
 
 }  // namespace mooncake
-

@@ -86,7 +86,8 @@ TEST(HAConfigPolicyTest, WrappedConfigForcesEtcdSnapshotBackend) {
     mooncake::WrappedMasterServiceConfig wrapped(sup, /*view_version=*/0);
 
     EXPECT_TRUE(wrapped.enable_ha);
-    EXPECT_EQ(wrapped.snapshot_backend_type, mooncake::SnapshotBackendType::ETCD);
+    EXPECT_EQ(wrapped.snapshot_backend_type,
+              mooncake::SnapshotBackendType::ETCD);
 }
 
 #else

@@ -40,7 +40,8 @@ class AllocationStrategy;
 class EvictionStrategy;
 class BufferAllocatorBase;
 struct StandbyObjectMetadata;
-// ReplicationService forward declaration removed - using etcd-based OpLog sync instead
+// ReplicationService forward declaration removed - using etcd-based OpLog sync
+// instead
 
 // Forward declarations for test classes
 namespace test {
@@ -119,21 +120,22 @@ class MasterService {
     // NOTE: This is used only on the node that was running HotStandbyService
     // right before it was promoted to leader.
     void RestoreFromStandbySnapshot(
-        const std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot,
+        const std::vector<std::pair<std::string, StandbyObjectMetadata>>&
+            snapshot,
         uint64_t initial_oplog_sequence_id);
 
-        // Export the current in-memory metadata state into StandbyObjectMetadata.
-        // This is primarily used by standby snapshot bootstrap after restoring a
-        // snapshot via RestoreState().
-        void ExportStandbySnapshot(
-            std::vector<std::pair<std::string, StandbyObjectMetadata>>& out,
-            uint64_t last_sequence_id, bool include_memory_replicas = true) const;
+    // Export the current in-memory metadata state into StandbyObjectMetadata.
+    // This is primarily used by standby snapshot bootstrap after restoring a
+    // snapshot via RestoreState().
+    void ExportStandbySnapshot(
+        std::vector<std::pair<std::string, StandbyObjectMetadata>>& out,
+        uint64_t last_sequence_id, bool include_memory_replicas = true) const;
 
-        // Get current OpLog last sequence_id (used to align standby baseline).
-        uint64_t GetOpLogLastSequenceId() const;
+    // Get current OpLog last sequence_id (used to align standby baseline).
+    uint64_t GetOpLogLastSequenceId() const;
 
-        // Whether RestoreState() successfully restored from a snapshot.
-        bool RestoredFromSnapshot() const;
+    // Whether RestoreState() successfully restored from a snapshot.
+    bool RestoredFromSnapshot() const;
 
     /**
      * @brief Fetch all segments, each node has a unique real client with fixed
@@ -460,10 +462,10 @@ class MasterService {
      * @param payload Optional payload data
      */
     void AppendOpLogAndNotify(OpType type, const std::string& key,
-                             const std::string& payload = std::string());
+                              const std::string& payload = std::string());
 
-    // Durable OpLog append: must succeed (write to etcd) for operations that may
-    // free/reuse memory (e.g. REMOVE). See OpLogManager::AppendAndPersist.
+    // Durable OpLog append: must succeed (write to etcd) for operations that
+    // may free/reuse memory (e.g. REMOVE). See OpLogManager::AppendAndPersist.
     auto AppendOpLogAndNotifyDurable(OpType type, const std::string& key,
                                      const std::string& payload = std::string())
         -> tl::expected<uint64_t, ErrorCode>;
@@ -786,8 +788,8 @@ class MasterService {
     std::string SerializeMetadataForOpLog(const ObjectMetadata& metadata) const;
 
     // Serialize metadata but exclude MEMORY replicas.
-    // Used for eviction: when memory replicas are freed/reused, Standby must not
-    // keep stale memory descriptors. We persist a PUT_END containing only
+    // Used for eviction: when memory replicas are freed/reused, Standby must
+    // not keep stale memory descriptors. We persist a PUT_END containing only
     // remaining (DISK/LOCAL_DISK) replicas before freeing memory.
     std::string SerializeMetadataForOpLogWithoutMemReplicas(
         const ObjectMetadata& metadata) const;
@@ -806,18 +808,20 @@ class MasterService {
     // If durable etcd write fails, we enqueue a pending mutation and retry
     // asynchronously to avoid long-term memory retention.
     enum class PendingMutationKind : uint8_t {
-        EVICT_MEM_REPLICAS = 1,          // drop MEMORY replicas; persist PUT_END or REMOVE
-        CLEAR_ALL_REPLICAS = 2,          // remove the whole key; persist REMOVE
-        CLEAR_REPLICAS_ON_SEGMENT = 3,   // remove COMPLETE replicas on segment; persist PUT_END/REMOVE
+        EVICT_MEM_REPLICAS =
+            1,  // drop MEMORY replicas; persist PUT_END or REMOVE
+        CLEAR_ALL_REPLICAS = 2,  // remove the whole key; persist REMOVE
+        CLEAR_REPLICAS_ON_SEGMENT =
+            3,  // remove COMPLETE replicas on segment; persist PUT_END/REMOVE
     };
     struct PendingMutation {
         PendingMutationKind kind{PendingMutationKind::EVICT_MEM_REPLICAS};
         std::string key;
         std::string segment_name;  // only for CLEAR_REPLICAS_ON_SEGMENT
-        // OpLog entry to persist. If sequence_id==0, this is a deferred action and
-        // the worker will allocate a new OpLogEntry at execution time.
-        // If sequence_id>0, sequence_id is pre-allocated and MUST be persisted as-is
-        // (implements: "enqueue time seq_id fixed and smaller").
+        // OpLog entry to persist. If sequence_id==0, this is a deferred action
+        // and the worker will allocate a new OpLogEntry at execution time. If
+        // sequence_id>0, sequence_id is pre-allocated and MUST be persisted
+        // as-is (implements: "enqueue time seq_id fixed and smaller").
         OpLogEntry oplog_entry;
         uint32_t attempt{0};
         std::chrono::steady_clock::time_point next_retry_at{};
@@ -829,31 +833,34 @@ class MasterService {
 
     // Helper for etcd durable write (HA only):
     // - Persist a pre-allocated OpLogEntry with small synchronous retries.
-    // - On failure, enqueue a PendingMutation (caller decides whether to proceed
+    // - On failure, enqueue a PendingMutation (caller decides whether to
+    // proceed
     //   with local state changes; we do NOT block per-key).
     ErrorCode PersistOpLogEntryWithSyncRetries(const OpLogEntry& entry) const;
-    void EnqueueRetryOnPersistFailure(const char* ctx, const OpLogEntry& entry,
-                                      ErrorCode persist_err,
-                                      PendingMutationKind kind,
-                                      const std::string& segment_name = std::string());
+    void EnqueueRetryOnPersistFailure(
+        const char* ctx, const OpLogEntry& entry, ErrorCode persist_err,
+        PendingMutationKind kind,
+        const std::string& segment_name = std::string());
 
     // Higher-level helper that also handles:
     // - STORE_USE_ETCD compile-time switch
     // - enable_ha_ runtime switch
     //
     // Behavior:
-    // - HA + STORE_USE_ETCD: AllocateEntry -> Persist (sync retries) -> enqueue on failure
+    // - HA + STORE_USE_ETCD: AllocateEntry -> Persist (sync retries) -> enqueue
+    // on failure
     // - non-HA: Append to in-memory OpLog buffer only
-    // - HA but STORE_USE_ETCD disabled: no-op (best-effort; see constructor warning)
-    void AppendOrPersistOrEnqueue(const char* ctx, OpType type,
-                                  const std::string& key,
-                                  const std::string& payload,
-                                  PendingMutationKind kind,
-                                  const std::string& segment_name = std::string());
+    // - HA but STORE_USE_ETCD disabled: no-op (best-effort; see constructor
+    // warning)
+    void AppendOrPersistOrEnqueue(
+        const char* ctx, OpType type, const std::string& key,
+        const std::string& payload, PendingMutationKind kind,
+        const std::string& segment_name = std::string());
 
     // Lazy-payload variant: payload is computed only when needed.
     // This is useful to avoid expensive metadata serialization when:
-    // - HA is enabled but STORE_USE_ETCD is disabled at compile time (no-op), or
+    // - HA is enabled but STORE_USE_ETCD is disabled at compile time (no-op),
+    // or
     // - the branch will not publish OpLog at all.
     void AppendOrPersistOrEnqueueLazy(
         const char* ctx, OpType type, const std::string& key,
@@ -862,10 +869,11 @@ class MasterService {
         const std::string& segment_name = std::string());
 
     // NOTE:
-    // We intentionally do NOT block subsequent operations for the same key when a
-    // durable OpLog write fails. Failed entries are retried asynchronously with the
-    // original pre-allocated sequence_id, and Standby handles gaps via timeout +
-    // late-arrival policy (apply late REMOVE/PUT_REVOKE, discard late PUT_END).
+    // We intentionally do NOT block subsequent operations for the same key when
+    // a durable OpLog write fails. Failed entries are retried asynchronously
+    // with the original pre-allocated sequence_id, and Standby handles gaps via
+    // timeout + late-arrival policy (apply late REMOVE/PUT_REVOKE, discard late
+    // PUT_END).
 
     static constexpr size_t kNumShards = 1024;  // Number of metadata shards
 
@@ -1169,6 +1177,11 @@ class MasterService {
 
     // cluster id for persistent sub directory
     const std::string cluster_id_;
+    // OpLog store type for HA
+    const OpLogStoreType oplog_store_type_;
+    // OpLog store configuration
+    const std::string oplog_store_root_dir_;
+    const int oplog_poll_interval_ms_;
     // root filesystem directory for persistent storage
     const std::string root_fs_dir_;
     // global 3fs/nfs segment size
@@ -1184,18 +1197,19 @@ class MasterService {
     BufferAllocatorType memory_allocator_type_;
 
     // Keep dummy allocators alive for memory replicas restored from standby.
-    // AllocatedBuffer stores allocator as weak_ptr; without an owning shared_ptr,
-    // the allocator would expire immediately and transport_endpoint_ would be lost
-    // when re-serializing Replica descriptors.
+    // AllocatedBuffer stores allocator as weak_ptr; without an owning
+    // shared_ptr, the allocator would expire immediately and
+    // transport_endpoint_ would be lost when re-serializing Replica
+    // descriptors.
     std::unordered_map<std::string, std::shared_ptr<BufferAllocatorBase>>
         standby_allocator_keepalive_;
 
     // Operation log manager for hot-standby replication. It records
     // state-changing operations so that a standby master can replay them.
     OpLogManager oplog_manager_;
-    
+
     // ReplicationService removed - using etcd-based OpLog sync instead
-    
+
     std::shared_ptr<AllocationStrategy> allocation_strategy_;
 
     bool enable_snapshot_restore_ = false;
@@ -1225,7 +1239,8 @@ class MasterService {
     std::deque<PendingMutation> pending_mutations_;
     std::atomic<bool> pending_mutations_running_{false};
     std::thread pending_mutations_thread_;
-    static constexpr size_t kMaxPendingMutations = 10000;  // Max queue size to prevent unbounded growth
+    static constexpr size_t kMaxPendingMutations =
+        10000;  // Max queue size to prevent unbounded growth
 
     // Discarded replicas management
     const std::chrono::seconds put_start_discard_timeout_sec_;

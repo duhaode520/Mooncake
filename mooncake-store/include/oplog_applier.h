@@ -84,8 +84,8 @@ class OpLogApplier {
     // - REMOVE / PUT_REVOKE: delete the key
     // - PUT_END: discard
     //
-    // This is used during Standby promotion so we don't block promotion on gaps,
-    // but still best-effort clean up potentially stale metadata.
+    // This is used during Standby promotion so we don't block promotion on
+    // gaps, but still best-effort clean up potentially stale metadata.
     struct GapResolveResult {
         size_t attempted{0};
         size_t fetched{0};
@@ -144,25 +144,30 @@ class OpLogApplier {
     // Track pending entries (entries with non-continuous sequence IDs)
     mutable std::mutex pending_mutex_;
     std::map<uint64_t, OpLogEntry> pending_entries_;
-    
+
     // Track missing sequence IDs that we're waiting for
-    std::map<uint64_t, std::chrono::steady_clock::time_point> missing_sequence_ids_;
+    std::map<uint64_t, std::chrono::steady_clock::time_point>
+        missing_sequence_ids_;
 
     // Sequence IDs we chose to skip (gap-timeout). If the late entry arrives:
     // - REMOVE / PUT_REVOKE: delete the key (safe)
     // - PUT_END: discard (do not resurrect potentially stale metadata)
-    std::map<uint64_t, std::chrono::steady_clock::time_point> skipped_sequence_ids_;
-    
+    std::map<uint64_t, std::chrono::steady_clock::time_point>
+        skipped_sequence_ids_;
+
     // Next expected global sequence_id. Read frequently from monitoring thread,
     // updated by watch/apply thread. Use atomic to avoid data races.
     std::atomic<uint64_t> expected_sequence_id_{1};
-    
+
     // Constants for missing entry handling
-    // IMPORTANT: request must happen BEFORE skip, otherwise we will never request.
-    static constexpr int kMissingEntryRequestSeconds = 1;  // request from etcd after 1s
-    static constexpr int kMissingEntrySkipSeconds = 3;     // skip after 3s (avoid global stall)
-    static constexpr int kMaxPendingEntries = 1000;     // Max pending entries before giving up
+    // IMPORTANT: request must happen BEFORE skip, otherwise we will never
+    // request.
+    static constexpr int kMissingEntryRequestSeconds =
+        1;  // request from etcd after 1s
+    static constexpr int kMissingEntrySkipSeconds =
+        3;  // skip after 3s (avoid global stall)
+    static constexpr int kMaxPendingEntries =
+        1000;  // Max pending entries before giving up
 };
 
 }  // namespace mooncake
-

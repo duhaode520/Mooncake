@@ -2,7 +2,6 @@
 
 #include <glog/logging.h>
 
-
 #include <algorithm>
 #include <chrono>
 
@@ -33,16 +32,18 @@ bool OpLogApplier::ApplyOpLogEntry(const OpLogEntry& entry) {
     // Basic DoS protection: validate key/payload sizes before parsing/applying.
     std::string size_reason;
     if (!OpLogManager::ValidateEntrySize(entry, &size_reason)) {
-        LOG(ERROR) << "OpLogApplier: entry size rejected, sequence_id=" << entry.sequence_id
-                   << ", key=" << entry.object_key << ", reason=" << size_reason;
+        LOG(ERROR) << "OpLogApplier: entry size rejected, sequence_id="
+                   << entry.sequence_id << ", key=" << entry.object_key
+                   << ", reason=" << size_reason;
         return false;
     }
 
     // Verify checksum to detect data corruption or tampering.
     if (!OpLogManager::VerifyChecksum(entry)) {
-        LOG(ERROR) << "OpLogApplier: checksum mismatch, sequence_id=" << entry.sequence_id
-                   << ", key=" << entry.object_key
-                   << ". Possible data corruption or tampering. Discarding entry.";
+        LOG(ERROR)
+            << "OpLogApplier: checksum mismatch, sequence_id="
+            << entry.sequence_id << ", key=" << entry.object_key
+            << ". Possible data corruption or tampering. Discarding entry.";
         HAMetricManager::instance().inc_oplog_checksum_failures();
         return false;
     }
@@ -50,12 +51,15 @@ bool OpLogApplier::ApplyOpLogEntry(const OpLogEntry& entry) {
     // Global ordering only.
     //
     // IMPORTANT:
-    // - Watch callbacks / retries may deliver duplicate or already-applied entries.
-    // - Those must be treated as no-op, not as "out-of-order pending", otherwise
+    // - Watch callbacks / retries may deliver duplicate or already-applied
+    // entries.
+    // - Those must be treated as no-op, not as "out-of-order pending",
+    // otherwise
     //   pending_entries_ can grow and the applier may appear stuck.
     const uint64_t expected = expected_sequence_id_.load();
     if (IsSequenceOlder(entry.sequence_id, expected)) {
-        // Late arrival of a previously-skipped gap entry: apply only if it's a delete/revoke.
+        // Late arrival of a previously-skipped gap entry: apply only if it's a
+        // delete/revoke.
         bool was_skipped = false;
         {
             std::lock_guard<std::mutex> lock(pending_mutex_);
@@ -66,7 +70,8 @@ bool OpLogApplier::ApplyOpLogEntry(const OpLogEntry& entry) {
             }
         }
         if (was_skipped) {
-            if (entry.op_type == OpType::REMOVE || entry.op_type == OpType::PUT_REVOKE) {
+            if (entry.op_type == OpType::REMOVE ||
+                entry.op_type == OpType::PUT_REVOKE) {
                 // Safe: ensure we don't keep stale metadata.
                 if (entry.op_type == OpType::REMOVE) {
                     ApplyRemove(entry);
@@ -95,9 +100,11 @@ bool OpLogApplier::ApplyOpLogEntry(const OpLogEntry& entry) {
         // Future entry - store into pending, wait for the gap to be filled.
         std::lock_guard<std::mutex> lock(pending_mutex_);
 
-        if (pending_entries_.size() >= static_cast<size_t>(kMaxPendingEntries)) {
+        if (pending_entries_.size() >=
+            static_cast<size_t>(kMaxPendingEntries)) {
             LOG(ERROR) << "OpLogApplier: too many pending entries ("
-                       << pending_entries_.size() << "), discarding entry sequence_id="
+                       << pending_entries_.size()
+                       << "), discarding entry sequence_id="
                        << entry.sequence_id << ", key=" << entry.object_key;
             return false;
         }
@@ -166,12 +173,13 @@ uint64_t OpLogApplier::GetExpectedSequenceId() const {
 void OpLogApplier::Recover(uint64_t last_applied_sequence_id) {
     expected_sequence_id_.store(last_applied_sequence_id + 1);
     LOG(INFO) << "OpLogApplier: recovered from sequence_id="
-              << last_applied_sequence_id
-              << ", expected_sequence_id set to=" << expected_sequence_id_.load();
+              << last_applied_sequence_id << ", expected_sequence_id set to="
+              << expected_sequence_id_.load();
 }
 
 size_t OpLogApplier::ProcessPendingEntries() {
-    // Check for missing sequence IDs, possibly skip after timeout, and/or request them.
+    // Check for missing sequence IDs, possibly skip after timeout, and/or
+    // request them.
     uint64_t missing_seq_to_request = 0;
     uint64_t skipped_count = 0;
     {
@@ -196,17 +204,21 @@ size_t OpLogApplier::ProcessPendingEntries() {
                 break;
             }
 
-            const auto waited = std::chrono::duration_cast<std::chrono::seconds>(now - it->second);
+            const auto waited =
+                std::chrono::duration_cast<std::chrono::seconds>(now -
+                                                                 it->second);
 
-            // Skip after timeout to avoid global stall (user requested behavior).
+            // Skip after timeout to avoid global stall (user requested
+            // behavior).
             if (waited.count() >= kMissingEntrySkipSeconds) {
                 skipped_sequence_ids_[missing_seq] = now;
                 missing_sequence_ids_.erase(missing_seq);
                 expected_sequence_id_.store(missing_seq + 1);
                 skipped_count++;
                 HAMetricManager::instance().inc_oplog_skipped_entries();
-                LOG(WARNING) << "OpLogApplier: skipped missing entry seq=" << missing_seq
-                             << " after " << waited.count() << "s timeout";
+                LOG(WARNING)
+                    << "OpLogApplier: skipped missing entry seq=" << missing_seq
+                    << " after " << waited.count() << "s timeout";
                 continue;  // may skip multiple consecutive gaps
             }
 
@@ -218,7 +230,7 @@ size_t OpLogApplier::ProcessPendingEntries() {
             break;
         }
     }
-    
+
     // Request missing OpLog if needed (outside the lock to avoid deadlock)
     bool retrieved_missing = false;
     if (missing_seq_to_request > 0) {
@@ -228,7 +240,7 @@ size_t OpLogApplier::ProcessPendingEntries() {
             missing_sequence_ids_.erase(missing_seq_to_request);
         }
     }
-    
+
     size_t processed_count = 0;
     for (;;) {
         OpLogEntry entry_copy;
@@ -267,7 +279,8 @@ size_t OpLogApplier::ProcessPendingEntries() {
                 ApplyRemove(entry_copy);
                 break;
             default:
-                LOG(ERROR) << "OpLogApplier: unsupported op_type in pending entry";
+                LOG(ERROR)
+                    << "OpLogApplier: unsupported op_type in pending entry";
                 break;
         }
 
@@ -285,11 +298,14 @@ size_t OpLogApplier::ProcessPendingEntries() {
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
         auto now = std::chrono::steady_clock::now();
-        for (auto it = missing_sequence_ids_.begin(); it != missing_sequence_ids_.end();) {
-            auto age = std::chrono::duration_cast<std::chrono::seconds>(now - it->second);
+        for (auto it = missing_sequence_ids_.begin();
+             it != missing_sequence_ids_.end();) {
+            auto age = std::chrono::duration_cast<std::chrono::seconds>(
+                now - it->second);
             if (age.count() > 60) {
-                LOG(WARNING) << "OpLogApplier: giving up on missing sequence_id="
-                             << it->first << " after " << age.count() << " seconds";
+                LOG(WARNING)
+                    << "OpLogApplier: giving up on missing sequence_id="
+                    << it->first << " after " << age.count() << " seconds";
                 it = missing_sequence_ids_.erase(it);
             } else {
                 ++it;
@@ -297,8 +313,10 @@ size_t OpLogApplier::ProcessPendingEntries() {
         }
 
         // Clean up old skipped sequence IDs too (avoid unbounded growth).
-        for (auto it = skipped_sequence_ids_.begin(); it != skipped_sequence_ids_.end();) {
-            auto age = std::chrono::duration_cast<std::chrono::seconds>(now - it->second);
+        for (auto it = skipped_sequence_ids_.begin();
+             it != skipped_sequence_ids_.end();) {
+            auto age = std::chrono::duration_cast<std::chrono::seconds>(
+                now - it->second);
             if (age.count() > 60) {
                 it = skipped_sequence_ids_.erase(it);
             } else {
@@ -309,7 +327,8 @@ size_t OpLogApplier::ProcessPendingEntries() {
 
     if (skipped_count > 0) {
         LOG(WARNING) << "OpLogApplier: skipped " << skipped_count
-                     << " missing sequence_id(s) after timeout, expected_sequence_id now="
+                     << " missing sequence_id(s) after timeout, "
+                        "expected_sequence_id now="
                      << expected_sequence_id_.load();
     }
 
@@ -363,7 +382,8 @@ OpLogApplier::GapResolveResult OpLogApplier::TryResolveGapsOnceForPromotion(
         OpLogEntry e;
         ErrorCode err = oplog_store_->ReadOpLog(seq, e);
         if (err != ErrorCode::OK) {
-            // Log failed gap for monitoring, but don't clear it so it can be retried later.
+            // Log failed gap for monitoring, but don't clear it so it can be
+            // retried later.
             LOG(WARNING) << "Promotion gap resolve: failed to fetch seq=" << seq
                          << ", err=" << static_cast<int>(err);
             continue;
@@ -386,8 +406,8 @@ OpLogApplier::GapResolveResult OpLogApplier::TryResolveGapsOnceForPromotion(
     }
 
     // Only clear gaps we successfully fetched and processed.
-    // Failed gaps remain in missing_sequence_ids_/skipped_sequence_ids_ for potential
-    // retry or monitoring.
+    // Failed gaps remain in missing_sequence_ids_/skipped_sequence_ids_ for
+    // potential retry or monitoring.
     if (!successfully_processed.empty()) {
         std::lock_guard<std::mutex> lock(pending_mutex_);
         for (uint64_t seq : successfully_processed) {
@@ -406,23 +426,26 @@ bool OpLogApplier::CheckSequenceOrder(const OpLogEntry& entry) {
 }
 
 void OpLogApplier::ApplyPutEnd(const OpLogEntry& entry) {
-    // Payload contains serialized metadata (replicas, size, etc.) in JSON format.
-    // Deserialize the payload immediately and store structured metadata.
-    // This allows Standby to serve requests immediately after promotion.
-    
+    // Payload contains serialized metadata (replicas, size, etc.) in JSON
+    // format. Deserialize the payload immediately and store structured
+    // metadata. This allows Standby to serve requests immediately after
+    // promotion.
+
     if (entry.payload.empty()) {
         // No payload - create empty metadata (legacy compatibility)
-        LOG(WARNING) << "OpLogApplier: PUT_END without payload, key=" << entry.object_key
+        LOG(WARNING) << "OpLogApplier: PUT_END without payload, key="
+                     << entry.object_key
                      << ", sequence_id=" << entry.sequence_id;
         StandbyObjectMetadata empty_metadata;
         empty_metadata.last_sequence_id = entry.sequence_id;
         if (!metadata_store_->PutMetadata(entry.object_key, empty_metadata)) {
-            LOG(ERROR) << "OpLogApplier: failed to PutMetadata key=" << entry.object_key
+            LOG(ERROR) << "OpLogApplier: failed to PutMetadata key="
+                       << entry.object_key
                        << ", sequence_id=" << entry.sequence_id;
         }
         return;
     }
-    
+
     // Deserialize payload using struct_pack (msgpack binary format)
     MetadataPayload payload;
     auto result = struct_pack::deserialize_to(payload, entry.payload);
@@ -437,13 +460,14 @@ void OpLogApplier::ApplyPutEnd(const OpLogEntry& entry) {
         metadata_store_->PutMetadata(entry.object_key, empty_metadata);
         return;
     }
-    
+
     // Convert to StandbyObjectMetadata and store
-    StandbyObjectMetadata metadata = payload.ToStandbyMetadata(entry.sequence_id);
-    
+    StandbyObjectMetadata metadata =
+        payload.ToStandbyMetadata(entry.sequence_id);
+
     if (!metadata_store_->PutMetadata(entry.object_key, metadata)) {
-        LOG(ERROR) << "OpLogApplier: failed to PutMetadata key=" << entry.object_key
-                   << ", sequence_id=" << entry.sequence_id;
+        LOG(ERROR) << "OpLogApplier: failed to PutMetadata key="
+                   << entry.object_key << ", sequence_id=" << entry.sequence_id;
     } else {
         VLOG(1) << "OpLogApplier: applied PUT_END, key=" << entry.object_key
                 << ", sequence_id=" << entry.sequence_id
@@ -458,7 +482,8 @@ void OpLogApplier::ApplyPutRevoke(const OpLogEntry& entry) {
     // Current implementation removes the entire key; if we later support
     // partial replica revocation this logic will need to be refined.
     if (!metadata_store_->Remove(entry.object_key)) {
-        LOG(WARNING) << "OpLogApplier: failed to Remove key=" << entry.object_key
+        LOG(WARNING) << "OpLogApplier: failed to Remove key="
+                     << entry.object_key
                      << " in PUT_REVOKE, sequence_id=" << entry.sequence_id
                      << " (key may not exist)";
     } else {
@@ -469,7 +494,8 @@ void OpLogApplier::ApplyPutRevoke(const OpLogEntry& entry) {
 
 void OpLogApplier::ApplyRemove(const OpLogEntry& entry) {
     if (!metadata_store_->Remove(entry.object_key)) {
-        LOG(WARNING) << "OpLogApplier: failed to Remove key=" << entry.object_key
+        LOG(WARNING) << "OpLogApplier: failed to Remove key="
+                     << entry.object_key
                      << ", sequence_id=" << entry.sequence_id
                      << " (key may not exist)";
     } else {
@@ -489,7 +515,7 @@ bool OpLogApplier::RequestMissingOpLog(uint64_t missing_seq_id) {
 
     OpLogEntry entry;
     ErrorCode err = oplog_store_->ReadOpLog(missing_seq_id, entry);
-    if (err == ErrorCode::ETCD_KEY_NOT_EXIST) {
+    if (err == ErrorCode::OPLOG_ENTRY_NOT_FOUND) {
         LOG(INFO) << "OpLogApplier: missing OpLog entry not found in store, "
                      "sequence_id="
                   << missing_seq_id;
@@ -512,7 +538,8 @@ bool OpLogApplier::RequestMissingOpLog(uint64_t missing_seq_id) {
 
     // Verify checksum before adding to pending entries.
     if (!OpLogManager::VerifyChecksum(entry)) {
-        LOG(ERROR) << "OpLogApplier: checksum mismatch for retrieved missing entry, sequence_id="
+        LOG(ERROR) << "OpLogApplier: checksum mismatch for retrieved missing "
+                      "entry, sequence_id="
                    << missing_seq_id << ", key=" << entry.object_key
                    << ". Possible data corruption. Discarding entry.";
         HAMetricManager::instance().inc_oplog_checksum_failures();
@@ -521,7 +548,8 @@ bool OpLogApplier::RequestMissingOpLog(uint64_t missing_seq_id) {
 
     // Successfully retrieved the missing OpLog entry
     LOG(INFO) << "OpLogApplier: retrieved missing OpLog entry, sequence_id="
-              << missing_seq_id << ", op_type=" << static_cast<int>(entry.op_type)
+              << missing_seq_id
+              << ", op_type=" << static_cast<int>(entry.op_type)
               << ", key=" << entry.object_key;
     HAMetricManager::instance().inc_oplog_gap_resolve_success();
 
@@ -538,9 +566,9 @@ void OpLogApplier::ScheduleWaitForMissingEntries(uint64_t missing_seq_id) {
     // This method is called when we first detect a missing sequence_id.
     // The actual waiting and requesting is handled in ProcessPendingEntries().
     // We just log it here for tracking.
-    VLOG(1) << "OpLogApplier: scheduling wait for missing sequence_id=" << missing_seq_id
-            << ", will request after " << kMissingEntryRequestSeconds << " seconds";
+    VLOG(1) << "OpLogApplier: scheduling wait for missing sequence_id="
+            << missing_seq_id << ", will request after "
+            << kMissingEntryRequestSeconds << " seconds";
 }
 
 }  // namespace mooncake
-

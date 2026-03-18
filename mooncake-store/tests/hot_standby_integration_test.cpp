@@ -25,14 +25,16 @@ namespace mooncake {
 namespace testing {
 
 DEFINE_string(hs_etcd_endpoints, "",
-              "Etcd endpoints for hot-standby integration tests (required for integration tests)");
+              "Etcd endpoints for hot-standby integration tests (required for "
+              "integration tests)");
 DEFINE_string(hs_cluster_id, "hs_integration_cluster",
               "Cluster ID prefix for hot-standby integration tests");
 
 // RAII helper to ensure HotStandbyService is always stopped
 class StandbyServiceGuard {
    public:
-    explicit StandbyServiceGuard(HotStandbyService* service) : service_(service) {}
+    explicit StandbyServiceGuard(HotStandbyService* service)
+        : service_(service) {}
     ~StandbyServiceGuard() {
         if (service_) {
             service_->Stop();
@@ -54,7 +56,8 @@ class StandbyServiceGuard {
 
 class HotStandbyIntegrationTest : public ::testing::Test {
    protected:
-    // Static mutex to ensure tests run serially and prevent etcd resource conflicts
+    // Static mutex to ensure tests run serially and prevent etcd resource
+    // conflicts
     static std::mutex test_mutex_;
     // Per-test lock guard to ensure lock is released even if test fails
     std::unique_ptr<std::lock_guard<std::mutex>> test_lock_;
@@ -69,7 +72,8 @@ class HotStandbyIntegrationTest : public ::testing::Test {
         // Check if etcd endpoints are provided
         if (FLAGS_hs_etcd_endpoints.empty()) {
             GTEST_SKIP() << "hs_etcd_endpoints not provided. "
-                            "Set --hs_etcd_endpoints=<endpoint> to run integration tests.";
+                            "Set --hs_etcd_endpoints=<endpoint> to run "
+                            "integration tests.";
         }
 
         // Initialize etcd client
@@ -103,7 +107,8 @@ class HotStandbyIntegrationTest : public ::testing::Test {
         // Clean up test data after each test
         CleanupTestData();
         // Give etcd watch goroutines time to clean up before next test
-        // Increased delay to allow watch streams and gRPC connections to fully close
+        // Increased delay to allow watch streams and gRPC connections to fully
+        // close
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         // Release lock (lock_guard will automatically unlock in destructor)
         test_lock_.reset();
@@ -111,7 +116,8 @@ class HotStandbyIntegrationTest : public ::testing::Test {
     }
 
    private:
-    // Helper function to construct end_key for DeleteRange to delete a single key
+    // Helper function to construct end_key for DeleteRange to delete a single
+    // key
     static std::string MakeEndKeyForSingleKey(const std::string& key) {
         std::string end_key = key;
         for (int i = static_cast<int>(end_key.size()) - 1; i >= 0; --i) {
@@ -144,14 +150,16 @@ class HotStandbyIntegrationTest : public ::testing::Test {
         };
         std::string end_key = prefix_end(prefix);
 
-        (void)EtcdHelper::DeleteRange(prefix.c_str(), prefix.size(), end_key.c_str(),
-                                      end_key.size());
+        (void)EtcdHelper::DeleteRange(prefix.c_str(), prefix.size(),
+                                      end_key.c_str(), end_key.size());
 
         // Also delete /latest key using DeleteRange
-        std::string latest_key = std::string("/oplog/") + FLAGS_hs_cluster_id + "/latest";
+        std::string latest_key =
+            std::string("/oplog/") + FLAGS_hs_cluster_id + "/latest";
         std::string latest_end_key = MakeEndKeyForSingleKey(latest_key);
         (void)EtcdHelper::DeleteRange(latest_key.c_str(), latest_key.size(),
-                                      latest_end_key.c_str(), latest_end_key.size());
+                                      latest_end_key.c_str(),
+                                      latest_end_key.size());
 #endif
     }
 };
@@ -169,8 +177,8 @@ TEST_F(HotStandbyIntegrationTest, TestPrimaryStandbySync) {
     // 1. Simulate primary writing OpLog entries to etcd
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
     // Write several test entries
     std::vector<std::string> test_keys;
@@ -197,14 +205,14 @@ TEST_F(HotStandbyIntegrationTest, TestPrimaryStandbySync) {
     hs_config.max_replication_lag_entries = 1000;
 
     HotStandbyService standby(hs_config);
-    StandbyServiceGuard guard(&standby);  // RAII: ensure cleanup even on failure
+    StandbyServiceGuard guard(
+        &standby);  // RAII: ensure cleanup even on failure
 
     ErrorCode start_err = standby.Start(
         /*primary_address_unused=*/"", FLAGS_hs_etcd_endpoints,
         FLAGS_hs_cluster_id);
 
-    ASSERT_EQ(ErrorCode::OK, start_err)
-        << "Failed to start HotStandbyService";
+    ASSERT_EQ(ErrorCode::OK, start_err) << "Failed to start HotStandbyService";
 
     // 3. Wait for the standby to finish initial sync
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -220,8 +228,7 @@ TEST_F(HotStandbyIntegrationTest, TestPrimaryStandbySync) {
                   << ", lag_entries=" << status.lag_entries
                   << ", is_connected=" << status.is_connected;
 
-        if (status.state == StandbyState::WATCHING &&
-            status.lag_entries == 0 &&
+        if (status.state == StandbyState::WATCHING && status.lag_entries == 0 &&
             status.applied_seq_id >= last_seq_id) {
             synced = true;
             break;
@@ -272,8 +279,8 @@ TEST_F(HotStandbyIntegrationTest, TestStandbyPromotion) {
     // 1. Write several OpLog entries
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
     std::vector<std::string> test_keys;
     for (int i = 0; i < 5; ++i) {
@@ -292,16 +299,15 @@ TEST_F(HotStandbyIntegrationTest, TestStandbyPromotion) {
     HotStandbyService standby(hs_config);
     StandbyServiceGuard guard(&standby);  // RAII: ensure cleanup
 
-    ASSERT_EQ(ErrorCode::OK, standby.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
 
     // Wait until sync finishes
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
         auto status = standby.GetSyncStatus();
         if (status.state == StandbyState::WATCHING &&
-            status.applied_seq_id >= last_seq_id &&
-            status.lag_entries == 0) {
+            status.applied_seq_id >= last_seq_id && status.lag_entries == 0) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -320,7 +326,8 @@ TEST_F(HotStandbyIntegrationTest, TestStandbyPromotion) {
     // 5. Verify sequence ID after promotion
     uint64_t promoted_seq_id = standby.GetLatestAppliedSequenceId();
     EXPECT_GE(promoted_seq_id, last_seq_id)
-        << "Promoted sequence ID should be at least the last written sequence ID";
+        << "Promoted sequence ID should be at least the last written sequence "
+           "ID";
 
     // 6. Verify metadata snapshot is still valid after promotion
     std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
@@ -351,8 +358,8 @@ TEST_F(HotStandbyIntegrationTest, TestFailoverScenario) {
     // 1. Simulate primary writing data
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
     std::vector<std::string> test_keys;
     for (int i = 0; i < 10; ++i) {
@@ -371,8 +378,8 @@ TEST_F(HotStandbyIntegrationTest, TestFailoverScenario) {
     HotStandbyService standby(hs_config);
     StandbyServiceGuard guard(&standby);  // RAII: ensure cleanup
 
-    ASSERT_EQ(ErrorCode::OK, standby.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
 
     // Wait for sync
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -426,8 +433,8 @@ TEST_F(HotStandbyIntegrationTest, TestDataConsistency) {
     // 1. Simulate primary writing mixed operations
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
     std::map<std::string, bool> expected_keys;  // key -> should_exist
 
@@ -465,16 +472,15 @@ TEST_F(HotStandbyIntegrationTest, TestDataConsistency) {
     HotStandbyService standby(hs_config);
     StandbyServiceGuard guard(&standby);  // RAII: ensure cleanup
 
-    ASSERT_EQ(ErrorCode::OK, standby.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
 
     // 3. Wait for sync
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
         auto status = standby.GetSyncStatus();
         if (status.state == StandbyState::WATCHING &&
-            status.applied_seq_id >= last_seq_id &&
-            status.lag_entries == 0) {
+            status.applied_seq_id >= last_seq_id && status.lag_entries == 0) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -528,14 +534,15 @@ TEST_F(HotStandbyIntegrationTest, TestMultipleStandbys) {
     // CancelWatchWithPrefix on the shared prefix before re-establishing).
     // This causes one standby to never receive watch events.
     // Skip until the architecture supports multiple watchers per prefix.
-    GTEST_SKIP() << "Skipped: multiple watchers on the same etcd prefix "
-                    "interfere with each other (known architecture limitation).";
+    GTEST_SKIP()
+        << "Skipped: multiple watchers on the same etcd prefix "
+           "interfere with each other (known architecture limitation).";
 
     // 1. Simulate primary writing data
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
     std::vector<std::string> test_keys;
     for (int i = 0; i < 10; ++i) {
@@ -566,10 +573,10 @@ TEST_F(HotStandbyIntegrationTest, TestMultipleStandbys) {
     StandbyServiceGuard guard1(&standby1);  // RAII: ensure cleanup
     StandbyServiceGuard guard2(&standby2);  // RAII: ensure cleanup
 
-    ASSERT_EQ(ErrorCode::OK, standby1.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
-    ASSERT_EQ(ErrorCode::OK, standby2.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby1.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby2.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
 
     // 3. Wait for both standbys to finish syncing
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -579,11 +586,9 @@ TEST_F(HotStandbyIntegrationTest, TestMultipleStandbys) {
         auto status1 = standby1.GetSyncStatus();
         auto status2 = standby2.GetSyncStatus();
 
-        LOG(INFO) << "Standby1: state="
-                  << StandbyStateToString(status1.state)
+        LOG(INFO) << "Standby1: state=" << StandbyStateToString(status1.state)
                   << ", applied_seq_id=" << status1.applied_seq_id
-                  << ", lag=" << status1.lag_entries
-                  << " | Standby2: state="
+                  << ", lag=" << status1.lag_entries << " | Standby2: state="
                   << StandbyStateToString(status2.state)
                   << ", applied_seq_id=" << status2.applied_seq_id
                   << ", lag=" << status2.lag_entries;
@@ -591,8 +596,8 @@ TEST_F(HotStandbyIntegrationTest, TestMultipleStandbys) {
         if (status1.state == StandbyState::WATCHING &&
             status2.state == StandbyState::WATCHING &&
             status1.applied_seq_id >= last_seq_id &&
-            status2.applied_seq_id >= last_seq_id &&
-            status1.lag_entries == 0 && status2.lag_entries == 0) {
+            status2.applied_seq_id >= last_seq_id && status1.lag_entries == 0 &&
+            status2.lag_entries == 0) {
             both_synced = true;
             break;
         }
@@ -648,7 +653,8 @@ TEST_F(HotStandbyIntegrationTest, TestLeaderElection) {
     std::string master_view_key = mv_helper.GetMasterViewKey();
     // Use DeleteRange to delete a single key
     std::string master_view_end_key = master_view_key;
-    for (int i = static_cast<int>(master_view_end_key.size()) - 1; i >= 0; --i) {
+    for (int i = static_cast<int>(master_view_end_key.size()) - 1; i >= 0;
+         --i) {
         unsigned char c = static_cast<unsigned char>(master_view_end_key[i]);
         if (c < 0xFF) {
             master_view_end_key[i] = static_cast<char>(c + 1);
@@ -659,11 +665,13 @@ TEST_F(HotStandbyIntegrationTest, TestLeaderElection) {
     if (master_view_end_key == master_view_key) {
         master_view_end_key = master_view_key + std::string(1, '\0');
     }
-    (void)EtcdHelper::DeleteRange(master_view_key.c_str(), master_view_key.size(),
-                                   master_view_end_key.c_str(), master_view_end_key.size());
+    (void)EtcdHelper::DeleteRange(
+        master_view_key.c_str(), master_view_key.size(),
+        master_view_end_key.c_str(), master_view_end_key.size());
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-    // 2. First node election (run in background thread because ElectLeader blocks)
+    // 2. First node election (run in background thread because ElectLeader
+    // blocks)
     std::string master1_address = "10.0.0.1:8888";
     ViewVersionId version1 = 0;
     EtcdLeaseId lease1 = 0;
@@ -713,7 +721,8 @@ TEST_F(HotStandbyIntegrationTest, TestLeaderElection) {
     }
 
     ASSERT_TRUE(election2_done) << "Master2 election should complete";
-    ASSERT_NE(0, lease2) << "Master2 should successfully elect after master1 fails";
+    ASSERT_NE(0, lease2)
+        << "Master2 should successfully elect after master1 fails";
 
     // Verify master view switches to the second node
     ASSERT_EQ(ErrorCode::OK,
@@ -750,8 +759,8 @@ TEST_F(HotStandbyIntegrationTest, TestHighThroughputSync) {
     HotStandbyService standby(hs_config);
     StandbyServiceGuard guard(&standby);  // RAII: ensure cleanup
 
-    ASSERT_EQ(ErrorCode::OK, standby.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
 
     // Wait for standby to enter WATCHING state
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -766,8 +775,8 @@ TEST_F(HotStandbyIntegrationTest, TestHighThroughputSync) {
     // 2. Simulate high-throughput writes on the primary
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
     const int num_writes = 100;
     std::string payload =
@@ -834,8 +843,8 @@ TEST_F(HotStandbyIntegrationTest, TestLargePayloadSync) {
     HotStandbyService standby(hs_config);
     StandbyServiceGuard guard(&standby);  // RAII: ensure cleanup
 
-    ASSERT_EQ(ErrorCode::OK, standby.Start("", FLAGS_hs_etcd_endpoints,
-                                            FLAGS_hs_cluster_id));
+    ASSERT_EQ(ErrorCode::OK,
+              standby.Start("", FLAGS_hs_etcd_endpoints, FLAGS_hs_cluster_id));
 
     // Wait for standby to enter WATCHING state
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -850,16 +859,19 @@ TEST_F(HotStandbyIntegrationTest, TestLargePayloadSync) {
     // 2. Write an entry with payload close to the maximum size
     OpLogManager primary_oplog;
     primary_oplog.SetOpLogStore(std::shared_ptr<OpLogStore>(
-        OpLogStoreFactory::Create(
-            OpLogStoreType::ETCD, FLAGS_hs_cluster_id, OpLogStoreRole::WRITER)));
+        OpLogStoreFactory::Create(OpLogStoreType::ETCD, FLAGS_hs_cluster_id,
+                                  OpLogStoreRole::WRITER)));
 
-    // Create a JSON payload close to but not exceeding the logical max payload size.
-    // Note: etcd has a default max request size limit for the entire request
-    // (including key, value, and metadata). The actual limit may be smaller than 2MB.
-    // We use 1MB to stay safely under typical etcd limits without requiring etcd config changes.
-    // kMaxPayloadSize = 10MB, but for integration tests we use 1MB to work with default etcd settings.
-    const size_t large_payload_size = 1024 * 1024;  // 1MB (safe for typical etcd limits)
-    std::string large_payload = R"({"client_id_first":1,"client_id_second":2,"size":1024,"replicas":[])";
+    // Create a JSON payload close to but not exceeding the logical max payload
+    // size. Note: etcd has a default max request size limit for the entire
+    // request (including key, value, and metadata). The actual limit may be
+    // smaller than 2MB. We use 1MB to stay safely under typical etcd limits
+    // without requiring etcd config changes. kMaxPayloadSize = 10MB, but for
+    // integration tests we use 1MB to work with default etcd settings.
+    const size_t large_payload_size =
+        1024 * 1024;  // 1MB (safe for typical etcd limits)
+    std::string large_payload =
+        R"({"client_id_first":1,"client_id_second":2,"size":1024,"replicas":[])";
     size_t padding_size = large_payload_size - large_payload.size() - 1;
     if (padding_size > 0) {
         large_payload += std::string(padding_size, 'X');
@@ -867,14 +879,17 @@ TEST_F(HotStandbyIntegrationTest, TestLargePayloadSync) {
     large_payload += "}";
 
     std::string key = "large_payload_key";
-    // Use AppendAndPersist to check if write succeeds (may fail if etcd limit is too small)
-    auto result = primary_oplog.AppendAndPersist(OpType::PUT_END, key, large_payload);
+    // Use AppendAndPersist to check if write succeeds (may fail if etcd limit
+    // is too small)
+    auto result =
+        primary_oplog.AppendAndPersist(OpType::PUT_END, key, large_payload);
     if (!result.has_value()) {
         // Write failed (likely due to etcd size limit), skip this test
-        GTEST_SKIP() << "Failed to write large payload to etcd (error="
-                     << static_cast<int>(result.error())
-                     << "). This may indicate etcd --max-request-bytes is too small. "
-                     << "Payload size was " << large_payload.size() << " bytes.";
+        GTEST_SKIP()
+            << "Failed to write large payload to etcd (error="
+            << static_cast<int>(result.error())
+            << "). This may indicate etcd --max-request-bytes is too small. "
+            << "Payload size was " << large_payload.size() << " bytes.";
     }
     uint64_t seq_id = result.value();
 
@@ -912,16 +927,17 @@ TEST_F(HotStandbyIntegrationTest, TestLargePayloadSync) {
 
     // 5. Verify that entries exceeding the maximum payload size are rejected
     std::string oversized_payload(OpLogManager::kMaxPayloadSize + 1, 'X');
-    // Note: OpLogManager::Append does not directly reject oversize payloads, but
-    // EtcdOpLogStore or OpLogApplier will validate them when applying.
-    // Here we verify that ValidateEntrySize rejects such an entry.
+    // Note: OpLogManager::Append does not directly reject oversize payloads,
+    // but EtcdOpLogStore or OpLogApplier will validate them when applying. Here
+    // we verify that ValidateEntrySize rejects such an entry.
     OpLogEntry test_entry;
     test_entry.object_key = "oversized_key";
     test_entry.payload = oversized_payload;
 
     std::string reason;
     bool is_valid = OpLogManager::ValidateEntrySize(test_entry, &reason);
-    EXPECT_FALSE(is_valid) << "Oversized payload should be rejected: " << reason;
+    EXPECT_FALSE(is_valid) << "Oversized payload should be rejected: "
+                           << reason;
 
     // guard will automatically stop the service
 #endif
@@ -942,5 +958,3 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-
-
