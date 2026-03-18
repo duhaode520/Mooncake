@@ -3003,14 +3003,14 @@ tl::expected<void, SerializationError> MasterService::PersistState(
         uint64_t last_seq_id = 0;
         std::vector<uint8_t> serialized_metadata;
         std::vector<uint8_t> serialized_segment;
+        std::vector<uint8_t> serialized_task_manager;
         {
             std::unique_lock<std::shared_mutex> lock(snapshot_mutex_);
             last_seq_id = oplog_manager_.GetLastSequenceId();
 
             MetadataSerializer metadata_serializer(this);
             SegmentSerializer segment_serializer(&segment_manager_);
-            // FIXME: NEEDS_REVIEW - main branch also serializes TaskManager here:
-            // TaskManagerSerializer task_manager_serializer(&task_manager_);
+            TaskManagerSerializer task_manager_serializer(&task_manager_);
 
             auto metadata_result = metadata_serializer.Serialize();
             if (!metadata_result) {
@@ -3039,8 +3039,22 @@ tl::expected<void, SerializationError> MasterService::PersistState(
                 "[Snapshot] segment serialization_successful, snapshot_id={}",
                 snapshot_id);
 
+            auto task_manager_result = task_manager_serializer.Serialize();
+            if (!task_manager_result) {
+                SNAP_LOG_ERROR(
+                    "[Snapshot] task manager serialization failed, snapshot_id={}, "
+                    "code={}, msg={}",
+                    snapshot_id, static_cast<int>(task_manager_result.error().code),
+                    task_manager_result.error().message);
+                return tl::make_unexpected(task_manager_result.error());
+            }
+            SNAP_LOG_INFO(
+                "[Snapshot] task manager serialization_successful, snapshot_id={}",
+                snapshot_id);
+
             serialized_metadata = std::move(metadata_result.value());
             serialized_segment = std::move(segment_result.value());
+            serialized_task_manager = std::move(task_manager_result.value());
         }
 
         if (out_seq_id) {
@@ -3056,6 +3070,8 @@ tl::expected<void, SerializationError> MasterService::PersistState(
         // Prepare file paths
         std::string metadata_path = path_prefix + SNAPSHOT_METADATA_FILE;
         std::string segment_path = path_prefix + SNAPSHOT_SEGMENTS_FILE;
+        std::string task_manager_path =
+            path_prefix + SNAPSHOT_TASK_MANAGER_FILE;
         std::string manifest_path = path_prefix + SNAPSHOT_MANIFEST_FILE;
         std::string latest_path = SNAPSHOT_ROOT + "/" + SNAPSHOT_LATEST_FILE;
 
@@ -3074,13 +3090,6 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             fmt::format("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}", SNAPSHOT_SERIALIZER_TYPE,
                         SNAPSHOT_SERIALIZER_VERSION, snapshot_id, meta_size,
                         meta_crc, seg_size, seg_crc, timestamp, "complete", last_seq_id);
-
-        // Format:
-        // protocol|version|snapshot_id|meta_size|meta_crc|seg_size|seg_crc|timestamp|status|oplog_seq_id
-        std::string manifest_content = fmt::format(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}", serializer_type_str,
-            SNAPSHOT_SERIALIZER_VERSION, snapshot_id, meta_size, meta_crc,
-            seg_size, seg_crc, timestamp, "complete", last_seq_id);
         std::vector<uint8_t> manifest_bytes(
             manifest_content.data(),
             manifest_content.data() + manifest_content.size());
@@ -3108,6 +3117,8 @@ tl::expected<void, SerializationError> MasterService::PersistState(
                 (staging_dir / SNAPSHOT_METADATA_FILE).string();
             std::string segments_file =
                 (staging_dir / SNAPSHOT_SEGMENTS_FILE).string();
+            std::string task_manager_file =
+                (staging_dir / SNAPSHOT_TASK_MANAGER_FILE).string();
             std::string manifest_file =
                 (staging_dir / SNAPSHOT_MANIFEST_FILE).string();
             std::string latest_file =
@@ -3127,6 +3138,14 @@ tl::expected<void, SerializationError> MasterService::PersistState(
                 return tl::make_unexpected(SerializationError(
                     ErrorCode::PERSISTENT_FAIL,
                     "Failed to save segments to staging file: " +
+                        save_result.error()));
+            }
+            save_result = FileUtil::SaveBinaryToFile(
+                serialized_task_manager, task_manager_file);
+            if (!save_result) {
+                return tl::make_unexpected(SerializationError(
+                    ErrorCode::PERSISTENT_FAIL,
+                    "Failed to save task manager to staging file: " +
                         save_result.error()));
             }
             save_result =
@@ -3149,12 +3168,14 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             // Release large buffers before uploading.
             std::vector<uint8_t>().swap(serialized_metadata);
             std::vector<uint8_t>().swap(serialized_segment);
+            std::vector<uint8_t>().swap(serialized_task_manager);
 
             // Prepare all files for batch upload (key + local file path).
             std::vector<std::pair<std::string, std::string>> files;
-            files.reserve(4);
+            files.reserve(5);
             files.emplace_back(metadata_path, metadata_file);
             files.emplace_back(segment_path, segments_file);
+            files.emplace_back(task_manager_path, task_manager_file);
             files.emplace_back(manifest_path, manifest_file);
             files.emplace_back(latest_path, latest_file);
 
@@ -3187,6 +3208,13 @@ tl::expected<void, SerializationError> MasterService::PersistState(
             upload_result =
                 UploadSnapshotFile(serialized_segment, segment_path,
                                    SNAPSHOT_SEGMENTS_FILE, snapshot_id);
+            if (!upload_result) {
+                return tl::make_unexpected(upload_result.error());
+            }
+
+            upload_result = UploadSnapshotFile(
+                serialized_task_manager, task_manager_path,
+                SNAPSHOT_TASK_MANAGER_FILE, snapshot_id);
             if (!upload_result) {
                 return tl::make_unexpected(upload_result.error());
             }
@@ -3574,6 +3602,21 @@ void MasterService::RestoreState() {
                 continue;
             }
 
+            // 4.5. Download task manager
+            std::string task_manager_path =
+                path_prefix + SNAPSHOT_TASK_MANAGER_FILE;
+            std::vector<uint8_t> task_manager_content;
+            download_result = snapshot_backend_->DownloadBuffer(
+                task_manager_path, task_manager_content);
+            if (!download_result) {
+                LOG(WARNING)
+                    << "[Restore] Failed to download task manager file: "
+                    << task_manager_path
+                    << " error=" << download_result.error()
+                    << " (may not exist in older snapshots, skipping)";
+                task_manager_content.clear();
+            }
+
             if (has_checksum) {
                 if (metadata_content.size() != expected_meta_size ||
                     Crc32c(metadata_content) != expected_meta_crc) {
@@ -3612,10 +3655,22 @@ void MasterService::RestoreState() {
                 LOG(ERROR) << "[Restore] Failed to save segments to file: "
                            << save_result.error();
             }
+            if (!task_manager_content.empty()) {
+                save_result = FileUtil::SaveBinaryToFile(
+                    task_manager_content,
+                    fs::path(snapshot_backup_dir_) / "restore" /
+                        SNAPSHOT_TASK_MANAGER_FILE);
+                if (!save_result) {
+                    LOG(ERROR)
+                        << "[Restore] Failed to save task manager to file: "
+                        << save_result.error();
+                }
+            }
 
             // 5. Deserialize state
             SegmentSerializer segment_serializer(&segment_manager_);
             MetadataSerializer metadata_serializer(this);
+            TaskManagerSerializer task_manager_serializer(&task_manager_);
 
             auto segments_result =
                 segment_serializer.Deserialize(segments_content);
@@ -3638,6 +3693,23 @@ void MasterService::RestoreState() {
             }
 
             LOG(INFO) << "[Restore] Deserialize metadata success";
+
+            if (!task_manager_content.empty()) {
+                auto task_manager_result =
+                    task_manager_serializer.Deserialize(task_manager_content);
+                if (!task_manager_result) {
+                    LOG(ERROR)
+                        << "[Restore] Failed to deserialize task manager: "
+                        << task_manager_result.error().code << " - "
+                        << task_manager_result.error().message;
+                    task_manager_serializer.Reset();
+                    metadata_serializer.Reset();
+                    segment_serializer.Reset();
+                    continue;
+                }
+                LOG(INFO) << "[Restore] Deserialize task manager success";
+            }
+
             restored = true;
             restored_snapshot_id = state_id;
             break;

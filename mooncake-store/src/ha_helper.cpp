@@ -340,7 +340,8 @@ void MasterServiceSupervisor::StartStandbyService(
     LOG(INFO) << "Standby snapshot bootstrap: "
               << (standby_config.enable_snapshot_bootstrap ? "enabled"
                                                            : "disabled")
-              << ", snapshot_backend=etcd"
+              << ", snapshot_backend="
+              << SnapshotBackendTypeToString(config_.snapshot_backend_type)
               << ", enable_snapshot=" << (config_.enable_snapshot ? 1 : 0)
               << ", enable_snapshot_restore_ignored=1";
 
@@ -349,7 +350,7 @@ void MasterServiceSupervisor::StartStandbyService(
     standby_service_ = std::make_unique<HotStandbyService>(standby_config);
     standby_service_->SetSnapshotProvider(
         std::make_unique<SerializerBackendSnapshotProvider>(
-            /*backend_type=*/SnapshotBackendType::ETCD,
+            /*backend_type=*/config_.snapshot_backend_type,
             /*etcd_endpoints=*/config_.etcd_endpoints,
             /*memory_allocator_type=*/config_.memory_allocator,
             /*snapshot_root=*/"master_snapshot"));
