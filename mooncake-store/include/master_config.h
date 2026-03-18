@@ -383,8 +383,7 @@ class WrappedMasterServiceConfig {
         snapshot_backup_dir = config.snapshot_backup_dir;
         snapshot_interval_seconds = config.snapshot_interval_seconds;
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
-        // HA mode policy: force ETCD snapshot backend.
-        snapshot_backend_type = SnapshotBackendType::ETCD;
+        snapshot_backend_type = config.snapshot_backend_type;
         etcd_endpoints = config.etcd_endpoints;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
