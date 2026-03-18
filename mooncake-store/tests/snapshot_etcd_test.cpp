@@ -308,7 +308,7 @@ TEST_F(SnapshotEtcdTest, SnapshotPersistViaDaemon) {
         << "Latest snapshot id mismatch";
 
     // Parse manifest: protocol|version|snapshot_id|meta_size|meta_crc|
-    // seg_size|seg_crc|ts|complete
+    // seg_size|seg_crc|timestamp|status|oplog_seq_id
     std::vector<std::string> parts;
     size_t start = 0;
     while (true) {
@@ -320,8 +320,8 @@ TEST_F(SnapshotEtcdTest, SnapshotPersistViaDaemon) {
         parts.push_back(manifest_value.substr(start, pos - start));
         start = pos + 1;
     }
-    ASSERT_EQ(parts.size(), 9u) << "Manifest format invalid: "
-                                << manifest_value;
+    ASSERT_EQ(parts.size(), 10u) << "Manifest format invalid: "
+                                 << manifest_value;
     EXPECT_EQ(snapshot_id, parts[2]) << "Manifest snapshot id mismatch";
     EXPECT_EQ("complete", parts[8]) << "Manifest status not complete";
 
@@ -632,3 +632,9 @@ TEST_F(SnapshotEtcdTest, MultipleSnapshotVersions) {
 }
 
 }  // namespace mooncake::test
+
+int main(int argc, char** argv) {
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

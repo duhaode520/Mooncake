@@ -5,6 +5,8 @@
 #include <iomanip>
 
 #include "ha_metric_manager.h"
+#include "oplog_serializer.h"
+#include "etcd_oplog_change_notifier.h"
 #include "utils/base64.h"
 
 #if __has_include(<jsoncpp/json/json.h>)
@@ -24,15 +26,10 @@ EtcdOpLogStore::EtcdOpLogStore(const std::string& cluster_id,
       enable_latest_seq_batch_update_(enable_latest_seq_batch_update),
       enable_batch_write_(enable_batch_write),
       last_update_time_(std::chrono::steady_clock::now()) {
-    // Normalize cluster_id to avoid accidental double slashes in etcd keys when
-    // caller passes a trailing '/' (master_view_key uses trailing '/', OpLog keys don't).
-    while (!cluster_id_.empty() && cluster_id_.back() == '/') {
-        cluster_id_.pop_back();
-    }
-
-    if (!cluster_id_.empty() && !IsValidClusterIdComponent(cluster_id_)) {
-        LOG(FATAL) << "Invalid cluster_id for EtcdOpLogStore: '" << cluster_id_
-                   << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
+    if (!NormalizeAndValidateClusterId(cluster_id_)) {
+        LOG(FATAL)
+            << "Invalid cluster_id for EtcdOpLogStore: '" << cluster_id_
+            << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
     }
 }
 
@@ -137,7 +134,35 @@ ErrorCode EtcdOpLogStore::WriteOpLog(const OpLogEntry& entry, bool sync) {
         return ErrorCode::INVALID_PARAMS;
     }
     std::string key = BuildOpLogKey(entry.sequence_id);
-    std::string value = SerializeOpLogEntry(entry);
+    std::string value = mooncake::SerializeOpLogEntry(entry);
+
+    // Fencing check: if this sequence_id was already persisted, verify
+    // that the existing value matches (idempotent retry) rather than
+    // silently returning OK via the batch wait short-circuit.
+    if (last_persisted_seq_id_.load() >= entry.sequence_id) {
+        ErrorCode create_err =
+            EtcdHelper::Create(key.c_str(), key.size(),
+                               value.c_str(), value.size());
+        if (create_err == ErrorCode::OK) {
+            // Key didn't exist yet — written successfully.
+            return ErrorCode::OK;
+        }
+        if (create_err == ErrorCode::ETCD_TRANSACTION_FAIL) {
+            // Key already exists — check for idempotency vs fencing.
+            std::string existing_value;
+            EtcdRevisionId rev;
+            ErrorCode get_err = EtcdHelper::Get(
+                key.c_str(), key.size(), existing_value, rev);
+            if (get_err == ErrorCode::OK && existing_value == value) {
+                return ErrorCode::OK;  // Idempotent retry
+            }
+            LOG(ERROR) << "Fencing violation in WriteOpLog: seq="
+                       << entry.sequence_id
+                       << " already persisted with different value";
+            return ErrorCode::ETCD_OPERATION_ERROR;
+        }
+        return create_err;
+    }
 
     {
         std::unique_lock<std::mutex> lock(batch_mutex_);
@@ -252,20 +277,39 @@ void EtcdOpLogStore::FlushBatch() {
             // BatchCreate uses Txn(If all keys CreateRevision==0).
             // Transaction failure means some keys already exist — likely
             // from a previous attempt that timed out but actually succeeded
-            // on the etcd side.  Since OpLog entries are idempotent (same
-            // sequence_id → same key/value), we can safely fall back to
-            // individual Put (overwrite) for the remaining keys.
+            // on the etcd side.  Fall back to per-key Create with
+            // idempotency check to preserve fencing semantics.
             LOG(WARNING)
                 << "BatchCreate transaction failed (keys already exist), "
-                << "falling back to per-key Put for " << keys.size()
+                << "falling back to per-key Create for " << keys.size()
                 << " entries";
             bool all_ok = true;
             for (size_t j = 0; j < keys.size(); ++j) {
-                ErrorCode put_err =
-                    EtcdHelper::Put(keys[j].c_str(), keys[j].size(),
-                                    values[j].c_str(), values[j].size());
-                if (put_err != ErrorCode::OK) {
-                    LOG(ERROR) << "Fallback Put failed for key=" << keys[j];
+                ErrorCode create_err =
+                    EtcdHelper::Create(keys[j].c_str(), keys[j].size(),
+                                       values[j].c_str(), values[j].size());
+                if (create_err == ErrorCode::OK) {
+                    continue;
+                }
+                if (create_err == ErrorCode::ETCD_TRANSACTION_FAIL) {
+                    // Key already exists — check if value matches (idempotent
+                    // retry) or differs (fencing violation).
+                    std::string existing_value;
+                    EtcdRevisionId rev;
+                    ErrorCode get_err = EtcdHelper::Get(
+                        keys[j].c_str(), keys[j].size(), existing_value, rev);
+                    if (get_err == ErrorCode::OK &&
+                        existing_value == values[j]) {
+                        // Idempotent: same content already written.
+                        continue;
+                    }
+                    LOG(ERROR)
+                        << "Fencing violation: key=" << keys[j]
+                        << " already exists with different value";
+                    all_ok = false;
+                } else {
+                    LOG(ERROR) << "Fallback Create failed for key="
+                               << keys[j] << ", err=" << create_err;
                     all_ok = false;
                 }
             }
@@ -332,7 +376,7 @@ ErrorCode EtcdOpLogStore::ReadOpLog(uint64_t sequence_id,
         return err;
     }
 
-    if (!DeserializeOpLogEntry(value, entry)) {
+    if (!mooncake::DeserializeOpLogEntry(value, entry)) {
         LOG(ERROR) << "Failed to deserialize OpLog entry, sequence_id="
                    << sequence_id;
         return ErrorCode::INTERNAL_ERROR;
@@ -435,8 +479,9 @@ ErrorCode EtcdOpLogStore::ReadOpLogSinceWithRevision(uint64_t start_sequence_id,
 
             OpLogEntry entry;
             const std::string value = kv.get("value", "").asString();
-            if (!DeserializeOpLogEntry(value, entry)) {
-                LOG(ERROR) << "Failed to deserialize OpLog entry from key=" << key;
+            if (!mooncake::DeserializeOpLogEntry(value, entry)) {
+                LOG(ERROR) << "Failed to deserialize OpLog entry from key="
+                           << key;
                 return ErrorCode::INTERNAL_ERROR;
             }
             entries.push_back(std::move(entry));
@@ -616,62 +661,9 @@ std::string EtcdOpLogStore::BuildSnapshotKey(
     return oss.str();
 }
 
-std::string EtcdOpLogStore::SerializeOpLogEntry(const OpLogEntry& entry) const {
-    Json::Value root;
-    root["sequence_id"] = static_cast<Json::UInt64>(entry.sequence_id);
-    root["timestamp_ms"] = static_cast<Json::UInt64>(entry.timestamp_ms);
-    root["op_type"] = static_cast<int>(entry.op_type);
-    root["object_key"] = entry.object_key;
-    // CRITICAL: Base64 encode binary payload to prevent UTF-8 corruption in
-    // JSON
-    root["payload"] = base64::Encode(entry.payload);
-    root["checksum"] = static_cast<Json::UInt>(entry.checksum);
-    root["prefix_hash"] = static_cast<Json::UInt>(entry.prefix_hash);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";  // Compact format
-    std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
-    std::ostringstream oss;
-    writer->write(root, &oss);
-    return oss.str();
-}
-
-bool EtcdOpLogStore::DeserializeOpLogEntry(const std::string& json_str,
-                                             OpLogEntry& entry) const {
-    Json::Value root;
-    Json::CharReaderBuilder builder;
-    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-    std::string errors;
-
-    if (!reader->parse(json_str.data(), json_str.data() + json_str.size(),
-                       &root, &errors)) {
-        LOG(ERROR) << "Failed to parse JSON: " << errors;
-        return false;
-    }
-
-    try {
-        entry.sequence_id = root["sequence_id"].asUInt64();
-        entry.timestamp_ms = root["timestamp_ms"].asUInt64();
-        entry.op_type = static_cast<OpType>(root["op_type"].asInt());
-        entry.object_key = root["object_key"].asString();
-        // CRITICAL: Base64 decode payload to restore binary data
-        entry.payload = base64::Decode(root["payload"].asString());
-        entry.checksum = root["checksum"].asUInt();
-        entry.prefix_hash = root["prefix_hash"].asUInt();
-    } catch (const std::exception& e) {
-        LOG(ERROR) << "Failed to deserialize OpLogEntry: " << e.what();
-        return false;
-    }
-
-    std::string size_reason;
-    if (!OpLogManager::ValidateEntrySize(entry, &size_reason)) {
-        LOG(ERROR) << "EtcdOpLogStore: entry size rejected, sequence_id="
-                   << entry.sequence_id << ", key=" << entry.object_key
-                   << ", reason=" << size_reason;
-        return false;
-    }
-
-    return true;
+std::unique_ptr<OpLogChangeNotifier> EtcdOpLogStore::CreateChangeNotifier(
+    const std::string& cluster_id) {
+    return std::make_unique<EtcdOpLogChangeNotifier>(cluster_id, this);
 }
 
 void EtcdOpLogStore::BatchUpdateThread() {

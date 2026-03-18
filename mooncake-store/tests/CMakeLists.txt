@@ -31,6 +31,27 @@ function(add_hot_standby_ut_test name)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+function(add_hot_standby_ut_test name)
+    add_executable(${name} ${ARGN})
+    target_include_directories(${name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_BINARY_DIR}/../include
+    )
+    target_link_libraries(${name} PUBLIC
+        mooncake_store
+        transfer_engine
+        cachelib_memory_allocator
+        ${ETCD_WRAPPER_LIB}
+        glog
+        gflags
+        ibverbs
+        gtest
+        gtest_main
+        pthread
+    )
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
 add_store_test(buffer_allocator_test buffer_allocator_test.cpp)
 add_store_test(allocation_strategy_test allocation_strategy_test.cpp)
 add_store_test(eviction_strategy_test eviction_strategy_test.cpp)
@@ -73,7 +94,6 @@ add_store_test(task_integration_test task_integration_test.cpp)
 add_store_test(dummy_client_get_buffer_test dummy_client_get_buffer_test.cpp)
 add_store_test(health_check_test health_check_test.cpp)
 
-# Hot Standby Unit Tests
 add_store_test(hot_standby_integration_test hot_standby_integration_test.cpp)
 
 add_subdirectory(e2e)
@@ -94,7 +114,7 @@ if(STORE_USE_ETCD)
 endif()
 
 add_executable(snapshot_etcd_test snapshot_etcd_test.cpp)
-target_link_libraries(snapshot_etcd_test PUBLIC mooncake_store cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gtest gtest_main pthread ibverbs)
+target_link_libraries(snapshot_etcd_test PUBLIC mooncake_store cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gflags gtest pthread ibverbs)
 if (STORE_USE_ETCD)
     add_test(NAME snapshot_etcd_test COMMAND snapshot_etcd_test)
 endif()
@@ -118,11 +138,13 @@ add_hot_standby_ut_test(oplog_applier_test
                         hot_standby_ut/oplog_applier_test.cpp)
 add_hot_standby_ut_test(oplog_manager_test
                         hot_standby_ut/oplog_manager_test.cpp)
-add_hot_standby_ut_test(oplog_watcher_test
-                        hot_standby_ut/oplog_watcher_test.cpp)
+add_hot_standby_ut_test(oplog_replicator_test
+                        hot_standby_ut/oplog_replicator_test.cpp)
 add_hot_standby_ut_test(ha_metric_manager_test
                         hot_standby_ut/ha_metric_manager_test.cpp)
 add_hot_standby_ut_test(hot_standby_service_test
                         hot_standby_ut/hot_standby_service_test.cpp)
 add_hot_standby_ut_test(etcd_oplog_store_test
                         hot_standby_ut/etcd_oplog_store_test.cpp)
+add_hot_standby_ut_test(oplog_serializer_test
+                        hot_standby_ut/oplog_serializer_test.cpp)

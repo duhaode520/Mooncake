@@ -81,6 +81,7 @@ inline bool IsValidClusterIdComponent(const std::string& cluster_id) {
     }
     return true;
 }
+
 static constexpr uint64_t DEFAULT_DEFAULT_KV_LEASE_TTL =
     5000;  // in milliseconds
 static constexpr uint64_t DEFAULT_KV_SOFT_PIN_TTL_MS =
