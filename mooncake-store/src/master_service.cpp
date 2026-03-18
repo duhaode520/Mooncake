@@ -63,6 +63,7 @@ MasterService::MasterService(const MasterServiceConfig& config)
       snapshot_interval_seconds_(config.snapshot_interval_seconds),
       snapshot_child_timeout_seconds_(config.snapshot_child_timeout_seconds),
       snapshot_retention_count_(config.snapshot_retention_count),
+      etcd_endpoints_(config.etcd_endpoints),
       put_start_discard_timeout_sec_(config.put_start_discard_timeout_sec),
       put_start_release_timeout_sec_(config.put_start_release_timeout_sec),
       task_manager_(config.task_manager_config),
@@ -73,7 +74,7 @@ MasterService::MasterService(const MasterServiceConfig& config)
         try {
             auto backend_type =
                 ParseSnapshotBackendType(config.snapshot_backend_type);
-            snapshot_backend_ = SerializerBackend::Create(backend_type);
+            snapshot_backend_ = SerializerBackend::Create(backend_type, config.etcd_endpoints);
         } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to create snapshot backend: " << e.what();
             throw std::runtime_error(

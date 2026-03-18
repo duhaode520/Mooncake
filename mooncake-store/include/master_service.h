@@ -438,6 +438,13 @@ class MasterService {
     void HandleChildTimeout(pid_t pid, const std::string& snapshot_id);
     void HandleChildExit(pid_t pid, int status, const std::string& snapshot_id);
 
+    // Daemon-based upload for batch operations (key + local file path)
+    bool StartSnapshotDaemon();
+    void StopSnapshotDaemon();
+    tl::expected<void, SerializationError> UploadViaDaemon(
+        const std::vector<std::pair<std::string, std::string>>& files,
+        const std::string& snapshot_id);
+
     // BatchEvict evicts objects in a near-LRU way, i.e., prioritizes to evict
     // object with smaller lease timeout. It has two passes. The first pass only
     // evicts objects without soft pin. The second pass prioritizes objects
@@ -456,7 +463,6 @@ class MasterService {
     // We need to clean up finished tasks periodically to avoid memory leak
     // And also we can add some task ttl mechanism in the future
     void TaskCleanupThreadFunc();
-
     // Internal data structures
     struct ObjectMetadata {
         // RAII-style metric management
@@ -1044,6 +1050,7 @@ class MasterService {
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     uint32_t snapshot_retention_count_ = DEFAULT_SNAPSHOT_RETENTION_COUNT;
     std::unique_ptr<SerializerBackend> snapshot_backend_;
+    std::string etcd_endpoints_;
     mutable std::shared_mutex snapshot_mutex_;
 
     // Discarded replicas management

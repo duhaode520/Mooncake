@@ -173,6 +173,7 @@ class MasterServiceSupervisorConfig {
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
         snapshot_retention_count = config.snapshot_retention_count;
         snapshot_backend_type = config.snapshot_backend_type;
+        etcd_endpoints = config.etcd_endpoints;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;
@@ -275,6 +276,8 @@ class WrappedMasterServiceConfig {
     std::string cxl_path = DEFAULT_CXL_PATH;
     size_t cxl_size = DEFAULT_CXL_SIZE;
     bool enable_cxl = false;
+    std::string etcd_endpoints = "0.0.0.0:2379";
+
     WrappedMasterServiceConfig() = default;
 
     // From MasterConfig
@@ -334,6 +337,7 @@ class WrappedMasterServiceConfig {
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
         snapshot_retention_count = config.snapshot_retention_count;
         snapshot_backend_type = config.snapshot_backend_type;
+        etcd_endpoints = config.etcd_endpoints;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;
@@ -381,6 +385,7 @@ class WrappedMasterServiceConfig {
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
         snapshot_retention_count = config.snapshot_retention_count;
         snapshot_backend_type = config.snapshot_backend_type;
+        etcd_endpoints = config.etcd_endpoints;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;
@@ -429,6 +434,7 @@ class MasterServiceConfigBuilder {
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     uint32_t snapshot_retention_count_ = DEFAULT_SNAPSHOT_RETENTION_COUNT;
     std::string snapshot_backend_type_;
+    std::string etcd_endpoints_ = "0.0.0.0:2379";
     uint32_t max_total_finished_tasks_ = DEFAULT_MAX_TOTAL_FINISHED_TASKS;
     uint32_t max_total_pending_tasks_ = DEFAULT_MAX_TOTAL_PENDING_TASKS;
     uint32_t max_total_processing_tasks_ = DEFAULT_MAX_TOTAL_PROCESSING_TASKS;
@@ -595,6 +601,11 @@ class MasterServiceConfigBuilder {
         processing_task_timeout_sec_ = sec;
         return *this;
     }
+    MasterServiceConfigBuilder& set_etcd_endpoints(
+        const std::string& endpoints) {
+        etcd_endpoints_ = endpoints;
+        return *this;
+    }
 
     MasterServiceConfigBuilder& set_max_retry_attempts(
         uint32_t max_retry_attempts) {
@@ -662,6 +673,7 @@ class MasterServiceConfig {
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     uint32_t snapshot_retention_count = DEFAULT_SNAPSHOT_RETENTION_COUNT;
     std::string snapshot_backend_type;
+    std::string etcd_endpoints = "0.0.0.0:2379";
     TaskManagerConfig task_manager_config = {
         .max_total_finished_tasks = DEFAULT_MAX_TOTAL_FINISHED_TASKS,
         .max_total_pending_tasks = DEFAULT_MAX_TOTAL_PENDING_TASKS,
@@ -708,6 +720,7 @@ class MasterServiceConfig {
         snapshot_child_timeout_seconds = config.snapshot_child_timeout_seconds;
         snapshot_retention_count = config.snapshot_retention_count;
         snapshot_backend_type = config.snapshot_backend_type;
+        etcd_endpoints = config.etcd_endpoints;
 
         task_manager_config.max_total_finished_tasks =
             config.max_total_finished_tasks;
@@ -757,6 +770,7 @@ inline MasterServiceConfig MasterServiceConfigBuilder::build() const {
     config.snapshot_child_timeout_seconds = snapshot_child_timeout_seconds_;
     config.snapshot_retention_count = snapshot_retention_count_;
     config.snapshot_backend_type = snapshot_backend_type_;
+    config.etcd_endpoints = etcd_endpoints_;
     config.task_manager_config.max_total_finished_tasks =
         max_total_finished_tasks_;
     config.task_manager_config.max_total_pending_tasks =
