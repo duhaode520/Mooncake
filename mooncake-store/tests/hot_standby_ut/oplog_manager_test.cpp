@@ -68,8 +68,7 @@ TEST_F(OpLogManagerTest, TestAllocateEntry) {
 }
 
 TEST_F(OpLogManagerTest, TestPersistEntryToEtcd) {
-    // Without an EtcdOpLogStore configured, PersistEntryToEtcd should return an
-    // error
+    // Without an EtcdOpLogStore configured, PersistEntryToEtcd should return an error
     OpLogEntry entry =
         M().AllocateEntry(OpType::PUT_END, "key", "payload-data");
 
@@ -78,8 +77,7 @@ TEST_F(OpLogManagerTest, TestPersistEntryToEtcd) {
 }
 
 TEST_F(OpLogManagerTest, TestAppendAndPersist) {
-    // Without an EtcdOpLogStore configured, AppendAndPersist should return an
-    // error
+    // Without an EtcdOpLogStore configured, AppendAndPersist should return an error
     auto res = M().AppendAndPersist(OpType::REMOVE, "key", "");
     ASSERT_FALSE(res.has_value());
     EXPECT_EQ(ErrorCode::ETCD_OPERATION_ERROR, res.error());
@@ -121,8 +119,7 @@ TEST_F(OpLogManagerTest, TestChecksumComputation) {
 }
 
 TEST_F(OpLogManagerTest, TestPrefixHashComputation) {
-    // Same key => same prefix_hash; different key => (with high probability)
-    // different prefix_hash
+    // Same key => same prefix_hash; different key => (with high probability) different prefix_hash
     OpLogEntry e1 = M().AllocateEntry(OpType::PUT_END, "same-key", "v1");
     OpLogEntry e2 = M().AllocateEntry(OpType::PUT_END, "same-key", "v2");
     OpLogEntry e3 = M().AllocateEntry(OpType::PUT_END, "other-key", "v3");
@@ -174,8 +171,7 @@ TEST_F(OpLogManagerTest, TestValidateEntrySize_PayloadTooLarge) {
 }
 
 TEST_F(OpLogManagerTest, TestValidateEntrySize_EmptyKey) {
-    // Current implementation only enforces upper bounds; empty keys are
-    // accepted
+    // Current implementation only enforces upper bounds; empty keys are accepted
     OpLogEntry entry;
     entry.object_key = "";
     entry.payload = "payload";
@@ -188,8 +184,7 @@ TEST_F(OpLogManagerTest, TestValidateEntrySize_EmptyKey) {
 
 TEST_F(OpLogManagerTest, TestWriteToEtcd_Success) {
 #if defined(STORE_USE_ETCD)
-    GTEST_SKIP()
-        << "TODO: requires real EtcdOpLogStore and running etcd cluster.";
+    GTEST_SKIP() << "TODO: requires real EtcdOpLogStore and running etcd cluster.";
 #else
     GTEST_SKIP() << "STORE_USE_ETCD is disabled.";
 #endif
@@ -203,20 +198,17 @@ TEST_F(OpLogManagerTest, TestWriteToEtcd_Failure) {
 }
 
 TEST_F(OpLogManagerTest, TestWriteToEtcd_Retry) {
-    GTEST_SKIP() << "TODO: retry / idempotent semantics are tested at "
-                    "EtcdOpLogStore level.";
+    GTEST_SKIP() << "TODO: retry / idempotent semantics are tested at EtcdOpLogStore level.";
 }
 
 TEST_F(OpLogManagerTest, TestIdempotentWrite) {
-    GTEST_SKIP() << "TODO: idempotent write belongs to "
-                    "EtcdOpLogStore::WriteOpLog tests.";
+    GTEST_SKIP() << "TODO: idempotent write belongs to EtcdOpLogStore::WriteOpLog tests.";
 }
 
 // ========== 2.1.5 Boundary condition tests ==========
 
 TEST_F(OpLogManagerTest, TestSequenceIdWrapAround) {
-    // Theoretical wrap-around test: set initial value near UINT64_MAX and
-    // verify wrap-around semantics
+    // Theoretical wrap-around test: set initial value near UINT64_MAX and verify wrap-around semantics
     uint64_t near_max = std::numeric_limits<uint64_t>::max() - 2;
     M().SetInitialSequenceId(near_max);
 
@@ -228,8 +220,7 @@ TEST_F(OpLogManagerTest, TestSequenceIdWrapAround) {
     ASSERT_EQ(3u, ids.size());
     // Use wrap-around-safe comparison helpers to verify monotonic increase
     EXPECT_TRUE(IsSequenceNewer(ids[1], ids[0]));
-    EXPECT_TRUE(IsSequenceNewer(
-        ids[2], ids[1]));  // 0 is considered newer than UINT64_MAX
+    EXPECT_TRUE(IsSequenceNewer(ids[2], ids[1]));  // 0 is considered newer than UINT64_MAX
 }
 
 TEST_F(OpLogManagerTest, TestConcurrentAppend) {
@@ -266,8 +257,7 @@ TEST_F(OpLogManagerTest, TestConcurrentAppend) {
 }
 
 TEST_F(OpLogManagerTest, TestLargePayload) {
-    // Construct a payload close to the upper limit and verify it passes
-    // validation and appends successfully
+    // Construct a payload close to the upper limit and verify it passes validation and appends successfully
     std::string key = "large-payload-key";
     std::string payload(OpLogManager::kMaxPayloadSize - 1, 'x');
 
@@ -289,3 +279,4 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+

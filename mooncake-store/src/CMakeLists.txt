@@ -26,6 +26,7 @@ set(MOONCAKE_STORE_SOURCES
     shm_helper.cpp
     http_metadata_server.cpp
     file_storage.cpp
+    serializer_snapshot_provider.cpp
     serialize/serializer.cpp
     serialize/serializer_backend.cpp
     utils/type_util.cpp
@@ -39,6 +40,10 @@ set(MOONCAKE_STORE_SOURCES
     hot_standby_service.cpp
     standby_state_machine.cpp
     ha_metric_manager.cpp)
+
+if (STORE_USE_ETCD)
+    list(APPEND MOONCAKE_STORE_SOURCES etcd_snapshot_provider.cpp)
+endif()
 
 set(EXTRA_LIBS "")
 
@@ -90,6 +95,15 @@ else()
     FATAL_ERROR
       "xxHash library/header not found. Please install xxhash (development headers) and try again."
   )
+endif()
+# Find xxHash (required for ComputeChecksum)
+find_path(XXHASH_INCLUDE_DIR NAMES xxhash.h PATHS /usr/include /usr/local/include)
+find_library(XXHASH_LIBRARY NAMES xxhash libxxhash PATHS /usr/lib /usr/local/lib /usr/lib64)
+if (XXHASH_INCLUDE_DIR AND XXHASH_LIBRARY)
+  message(STATUS "Found xxHash: include=${XXHASH_INCLUDE_DIR} lib=${XXHASH_LIBRARY}")
+  list(APPEND MASTER_EXTRA_INCS ${XXHASH_INCLUDE_DIR})
+else()
+  message(FATAL_ERROR "xxHash library/header not found. Please install xxhash (development headers) and try again.")
 endif()
 
 if(USE_3FS)
@@ -198,4 +212,18 @@ target_link_libraries(mooncake_client PRIVATE mooncake_store transfer_engine
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_client DESTINATION bin)
+# Mock client simulator binary
+add_executable(mock_client mock_client_main.cpp)
+target_link_libraries(mock_client PRIVATE
+    mooncake_store
+    cachelib_memory_allocator
+    glog::glog
+    gflags::gflags
+    pthread
+)
+if (STORE_USE_ETCD)
+    add_dependencies(mock_client build_etcd_wrapper)
+    target_link_libraries(mock_client PRIVATE ${ETCD_WRAPPER_LIB})
+endif()
+
+install(TARGETS mooncake_master mooncake_client mock_client snapshot_uploader_daemon DESTINATION bin)

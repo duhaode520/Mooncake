@@ -11,8 +11,7 @@
 
 #include "etcd_helper.h"
 
-DEFINE_string(etcd_endpoints, "0.0.0.0:2379",
-              "Etcd endpoints for EtcdOpLogStoreTest");
+DEFINE_string(etcd_endpoints, "0.0.0.0:2379", "Etcd endpoints for EtcdOpLogStoreTest");
 
 namespace mooncake::test {
 
@@ -37,8 +36,7 @@ class EtcdOpLogStoreTest : public ::testing::Test {
 
     void SetUp() override {
 #ifndef STORE_USE_ETCD
-        GTEST_SKIP()
-            << "STORE_USE_ETCD is disabled, skipping EtcdOpLogStore tests.";
+        GTEST_SKIP() << "STORE_USE_ETCD is disabled, skipping EtcdOpLogStore tests.";
 #else
         cluster_id_ = "test_cluster_etcd_oplog_store";
         store_ = std::make_unique<EtcdOpLogStore>(
@@ -78,8 +76,8 @@ class EtcdOpLogStoreTest : public ::testing::Test {
         };
         std::string end_key = prefix_end(prefix);
 
-        (void)EtcdHelper::DeleteRange(prefix.c_str(), prefix.size(),
-                                      end_key.c_str(), end_key.size());
+        (void)EtcdHelper::DeleteRange(prefix.c_str(), prefix.size(), end_key.c_str(),
+                                      end_key.size());
 #endif
     }
 
@@ -127,7 +125,8 @@ TEST_F(EtcdOpLogStoreTest, TestReadOpLog) {
 TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince) {
     // Write multiple entries
     for (uint64_t i = 10; i < 15; ++i) {
-        OpLogEntry e = MakeEntry(i, OpType::PUT_END, "key_" + std::to_string(i),
+        OpLogEntry e = MakeEntry(i, OpType::PUT_END,
+                                 "key_" + std::to_string(i),
                                  "value_" + std::to_string(i));
         ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e));
     }
@@ -150,7 +149,8 @@ TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince_Empty) {
 
 TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince_Limit) {
     for (uint64_t i = 1; i <= 5; ++i) {
-        OpLogEntry e = MakeEntry(i, OpType::PUT_END, "key_" + std::to_string(i),
+        OpLogEntry e = MakeEntry(i, OpType::PUT_END,
+                                 "key_" + std::to_string(i),
                                  "value_" + std::to_string(i));
         ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e));
     }
@@ -166,11 +166,9 @@ TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince_Limit) {
 // ========== 3.1.2 Serialization tests ==========
 
 TEST_F(EtcdOpLogStoreTest, TestSerializeDeserializeRoundTrip) {
-    OpLogEntry in =
-        MakeEntry(42, OpType::PUT_END, "roundtrip-key", "roundtrip-value");
+    OpLogEntry in = MakeEntry(42, OpType::PUT_END, "roundtrip-key", "roundtrip-value");
 
-    // Indirectly verify serialization / deserialization via WriteOpLog +
-    // ReadOpLog
+    // Indirectly verify serialization / deserialization via WriteOpLog + ReadOpLog
     ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(in));
 
     OpLogEntry out;
@@ -183,13 +181,12 @@ TEST_F(EtcdOpLogStoreTest, TestSerializeDeserializeRoundTrip) {
 }
 
 TEST_F(EtcdOpLogStoreTest, TestDeserializeInvalidJson) {
-    // Write invalid JSON directly into etcd; subsequent ReadOpLog should return
-    // INTERNAL_ERROR
+    // Write invalid JSON directly into etcd; subsequent ReadOpLog should return INTERNAL_ERROR
     std::string key = "/oplog/" + cluster_id_ + "/00000000000000000077";
     std::string bad_json = "{ this is not valid json }";
     ASSERT_EQ(ErrorCode::OK,
-              EtcdHelper::Put(key.c_str(), key.size(), bad_json.c_str(),
-                              bad_json.size()));
+              EtcdHelper::Put(key.c_str(), key.size(),
+                              bad_json.c_str(), bad_json.size()));
 
     OpLogEntry out;
     ASSERT_EQ(ErrorCode::INTERNAL_ERROR, store_->ReadOpLog(77, out));
@@ -205,10 +202,10 @@ TEST_F(EtcdOpLogStoreTest, TestWriteOpLog_Fencing) {
     OpLogEntry e2 = e1;
     ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e2));
 
-    // NOTE: Duplicate sequence_id with different content is not a supported
-    // production scenario (sequence_id is monotonic). The batching write path
-    // does not guarantee conflict detection for that case, so we don't assert
-    // on it here.
+    // Same seq, different content => conflict (ETCD_OPERATION_ERROR)
+    OpLogEntry e3 = e1;
+    e3.payload = "value2";
+    EXPECT_EQ(ErrorCode::ETCD_OPERATION_ERROR, store_->WriteOpLog(e3));
 }
 
 TEST_F(EtcdOpLogStoreTest, TestWriteOpLog_Idempotent) {
@@ -236,15 +233,14 @@ TEST_F(EtcdOpLogStoreTest, TestGetLatestSequenceId) {
 TEST_F(EtcdOpLogStoreTest, TestGetMaxSequenceIdAndEmpty) {
     uint64_t max_seq = 0;
 
-    // Empty cluster: after cleanup, GetMaxSequenceId should return
-    // ETCD_KEY_NOT_EXIST
+    // Empty cluster: after cleanup, GetMaxSequenceId should return ETCD_KEY_NOT_EXIST
     CleanupTestData();
     EXPECT_EQ(ErrorCode::ETCD_KEY_NOT_EXIST, store_->GetMaxSequenceId(max_seq));
 
-    // After writing several entries, MaxSequenceId should equal the last
-    // entry's seq
+    // After writing several entries, MaxSequenceId should equal the last entry's seq
     for (uint64_t i = 10; i <= 15; ++i) {
-        OpLogEntry e = MakeEntry(i, OpType::PUT_END, "key_" + std::to_string(i),
+        OpLogEntry e = MakeEntry(i, OpType::PUT_END,
+                                 "key_" + std::to_string(i),
                                  "value_" + std::to_string(i));
         ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e));
     }
@@ -254,8 +250,7 @@ TEST_F(EtcdOpLogStoreTest, TestGetMaxSequenceIdAndEmpty) {
 }
 
 TEST_F(EtcdOpLogStoreTest, TestUpdateLatestSequenceId) {
-    // Directly call UpdateLatestSequenceId, then GetLatestSequenceId should
-    // match
+    // Directly call UpdateLatestSequenceId, then GetLatestSequenceId should match
     ASSERT_EQ(ErrorCode::OK, store_->UpdateLatestSequenceId(12345));
 
     uint64_t latest = 0;
@@ -266,8 +261,7 @@ TEST_F(EtcdOpLogStoreTest, TestUpdateLatestSequenceId) {
 // ========== 3.1.5 Batch update tests ==========
 
 TEST_F(EtcdOpLogStoreTest, TestBatchUpdate_EnabledAndThreshold) {
-    // Use a store with batch enabled, then verify /latest is updated to the max
-    // seq
+    // Use a store with batch enabled, then verify /latest is updated to the max seq
     EtcdOpLogStore writer(cluster_id_,
                           /*enable_latest_seq_batch_update=*/true,
                           /*enable_batch_write=*/true);
@@ -291,8 +285,7 @@ TEST_F(EtcdOpLogStoreTest, TestBatchUpdate_EnabledAndThreshold) {
 }
 
 TEST_F(EtcdOpLogStoreTest, TestBatchUpdate_FailurePlaceholder) {
-    GTEST_SKIP() << "Batch failure scenarios are better tested with a "
-                    "fault-injection etcd wrapper.";
+    GTEST_SKIP() << "Batch failure scenarios are better tested with a fault-injection etcd wrapper.";
 }
 
 // ========== 3.1.6 Cleanup tests ==========
@@ -300,9 +293,9 @@ TEST_F(EtcdOpLogStoreTest, TestBatchUpdate_FailurePlaceholder) {
 TEST_F(EtcdOpLogStoreTest, TestCleanupOpLogBeforeAndBoundary) {
     // Write seq 1..5
     for (uint64_t i = 1; i <= 5; ++i) {
-        OpLogEntry e =
-            MakeEntry(i, OpType::PUT_END, "cleanup_key_" + std::to_string(i),
-                      "cleanup_val_" + std::to_string(i));
+        OpLogEntry e = MakeEntry(i, OpType::PUT_END,
+                                 "cleanup_key_" + std::to_string(i),
+                                 "cleanup_val_" + std::to_string(i));
         ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e));
     }
 
@@ -329,8 +322,7 @@ TEST_F(EtcdOpLogStoreTest, TestCleanupOpLogBefore_Empty) {
 // ========== 3.1.7 Cluster ID validation tests ==========
 
 TEST_F(EtcdOpLogStoreTest, TestInvalidClusterId_Rejected) {
-    // Invalid cluster_id (containing slashes) should trigger LOG(FATAL) and
-    // terminate
+    // Invalid cluster_id (containing slashes) should trigger LOG(FATAL) and terminate
     EXPECT_DEATH(
         {
             EtcdOpLogStore bad_store("invalid/cluster", false);
@@ -350,8 +342,7 @@ TEST_F(EtcdOpLogStoreTest, TestClusterIdNormalization) {
     OpLogEntry e = MakeEntry(999, OpType::PUT_END, "norm-key", "norm-val");
     ASSERT_EQ(ErrorCode::OK, normalized_store.WriteOpLog(e));
 
-    // Read the same seq via the current store_ to confirm the normalized
-    // cluster_id is used
+    // Read the same seq via the current store_ to confirm the normalized cluster_id is used
     OpLogEntry out;
     ASSERT_EQ(ErrorCode::OK, store_->ReadOpLog(999, out));
     EXPECT_EQ("norm-key", out.object_key);
@@ -363,9 +354,9 @@ TEST_F(EtcdOpLogStoreTest, TestClusterIdNormalization) {
 TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince_Pagination) {
     // Write 20 entries and verify pagination via limit
     for (uint64_t i = 1; i <= 20; ++i) {
-        OpLogEntry e =
-            MakeEntry(i, OpType::PUT_END, "page_key_" + std::to_string(i),
-                      "page_val_" + std::to_string(i));
+        OpLogEntry e = MakeEntry(i, OpType::PUT_END,
+                                 "page_key_" + std::to_string(i),
+                                 "page_val_" + std::to_string(i));
         ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e));
     }
 
@@ -378,15 +369,14 @@ TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince_Pagination) {
 }
 
 TEST_F(EtcdOpLogStoreTest, TestReadOpLogSince_LargeDataset) {
-    // Write a larger number of entries to verify ReadOpLogSince returns the
-    // first N correctly
+    // Write a larger number of entries to verify ReadOpLogSince returns the first N correctly
     const uint64_t total = 200;
     const uint64_t limit = 150;
     CleanupTestData();
     for (uint64_t i = 1; i <= total; ++i) {
-        OpLogEntry e =
-            MakeEntry(i, OpType::PUT_END, "large_key_" + std::to_string(i),
-                      "large_val_" + std::to_string(i));
+        OpLogEntry e = MakeEntry(i, OpType::PUT_END,
+                                 "large_key_" + std::to_string(i),
+                                 "large_val_" + std::to_string(i));
         ASSERT_EQ(ErrorCode::OK, store_->WriteOpLog(e));
     }
 
@@ -404,3 +394,5 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+
+

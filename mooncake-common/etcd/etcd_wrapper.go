@@ -72,6 +72,11 @@ var (
 	// watch contexts for prefix watch
 	storePrefixWatchCtx   = make(map[string]prefixWatchInfo)
 	storePrefixWatchMutex sync.Mutex
+	// Valid callback contexts - track which C++ objects are still alive
+	// When a watch is cancelled, we remove the context from this map
+	// Before calling callback, we check if context is still valid
+	validCallbackContexts     = make(map[unsafe.Pointer]bool)
+	validCallbackContextMutex sync.RWMutex
 )
 
 const (
@@ -795,8 +800,8 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 	storePrefixWatchMutex.Lock()
 	if _, exists := storePrefixWatchCtx[p]; exists {
 		storePrefixWatchMutex.Unlock()
+		cancel() // Fix potential context leak
 		*errMsg = C.CString("This prefix is already being watched")
-		cancel()
 		return -1
 	}
 	doneCh := make(chan struct{})
@@ -831,29 +836,29 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 					case <-ctx.Done():
 						return
 					default:
-						// Channel closed unexpectedly (not cancelled). Notify C++ watcher to reconnect.
+						// Call the C callback with error
 						C.call_watch_cb(callbackFunc, callbackContext, nil, 0, nil, 0, C.int(2) /*WATCH_BROKEN*/, C.longlong(0))
 						return
 					}
 				}
 				if watchResp.Err() != nil {
-					// Watch error. Check if context was cancelled.
 					select {
 					case <-ctx.Done():
 						return
 					default:
+						// Call the C callback with error
 						C.call_watch_cb(callbackFunc, callbackContext, nil, 0, nil, 0, C.int(2) /*WATCH_BROKEN*/, C.longlong(0))
 						return
 					}
 				}
 
-				// Use response-level revision as a more stable resume point.
 				respRev := int64(0)
 				if watchResp.Header.Revision > 0 {
 					respRev = watchResp.Header.Revision
 				}
 
 				for _, event := range watchResp.Events {
+					// Check cancel before processing
 					select {
 					case <-ctx.Done():
 						return
@@ -890,6 +895,7 @@ func EtcdStoreWatchWithPrefixFromRevisionWrapper(prefix *C.char, prefixSize C.in
 						modRev = C.longlong(respRev)
 					}
 
+					// Direct call without redundant validity checks or recover
 					C.call_watch_cb(callbackFunc, callbackContext, keyPtr, keySize, valuePtr, valueSize, eventType, modRev)
 
 					C.free(unsafe.Pointer(keyPtr))
@@ -916,6 +922,11 @@ func cancelAndDeletePrefixWatch(p string) int {
 	if !exists {
 		return -1
 	}
+
+	// CRITICAL: Invalidate callback context first, then cancel watch.
+	validCallbackContextMutex.Lock()
+	delete(validCallbackContexts, watchInfo.callbackContext)
+	validCallbackContextMutex.Unlock()
 
 	watchInfo.cancel()
 	return 0

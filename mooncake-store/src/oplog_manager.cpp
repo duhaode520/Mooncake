@@ -116,20 +116,25 @@ void OpLogManager::SetInitialSequenceId(uint64_t sequence_id) {
     if (last_seq_id_ == 0 && buffer_.empty()) {
         // Only allow setting initial sequence_id if OpLogManager is empty
         last_seq_id_ = sequence_id;
-        first_seq_id_ = sequence_id +
-                        1;  // first_seq_id_ should be > last_seq_id_ when empty
+        first_seq_id_ = sequence_id + 1;  // first_seq_id_ should be > last_seq_id_ when empty
         LOG(INFO) << "OpLogManager initial sequence_id set to " << sequence_id;
     } else {
-        LOG(WARNING)
-            << "Cannot set initial sequence_id: OpLogManager is not empty "
-            << "(last_seq_id_=" << last_seq_id_
-            << ", buffer_size=" << buffer_.size() << ")";
+        LOG(WARNING) << "Cannot set initial sequence_id: OpLogManager is not empty "
+                     << "(last_seq_id_=" << last_seq_id_ << ", buffer_size=" << buffer_.size() << ")";
     }
 }
 
 size_t OpLogManager::GetEntryCount() const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     return buffer_.size();
+}
+
+ErrorCode OpLogManager::CleanupOpLogBefore(uint64_t before_sequence_id) {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    if (!etcd_oplog_store_) {
+        return ErrorCode::OK;
+    }
+    return etcd_oplog_store_->CleanupOpLogBefore(before_sequence_id);
 }
 
 uint64_t OpLogManager::NowMs() {
@@ -140,8 +145,7 @@ uint64_t OpLogManager::NowMs() {
 
 uint32_t OpLogManager::ComputeChecksum(const std::string& data) {
     // Use xxHash XXH32 for a fast, deterministic 32-bit checksum.
-    // Requires linking against xxHash (e.g., libxxhash) and including
-    // <xxhash.h>.
+    // Requires linking against xxHash (e.g., libxxhash) and including <xxhash.h>.
     return static_cast<uint32_t>(XXH32(data.data(), data.size(), 0));
 }
 
@@ -151,8 +155,7 @@ uint32_t OpLogManager::ComputePrefixHash(const std::string& key) {
     }
     // Use XXH32 for consistency with ComputeChecksum and better performance.
     // XXH32 provides faster hashing and lower collision rate than std::hash.
-    // Computing hash for the entire key ensures better distribution and fewer
-    // collisions.
+    // Computing hash for the entire key ensures better distribution and fewer collisions.
     return static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
 }
 
@@ -172,8 +175,8 @@ bool OpLogManager::ValidateEntrySize(const OpLogEntry& entry,
     }
     if (entry.payload.size() > kMaxPayloadSize) {
         if (reason) {
-            *reason = "payload too large: size=" +
-                      std::to_string(entry.payload.size());
+            *reason =
+                "payload too large: size=" + std::to_string(entry.payload.size());
         }
         return false;
     }
@@ -181,3 +184,5 @@ bool OpLogManager::ValidateEntrySize(const OpLogEntry& entry,
 }
 
 }  // namespace mooncake
+
+

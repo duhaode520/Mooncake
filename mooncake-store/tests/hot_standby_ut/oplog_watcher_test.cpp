@@ -30,8 +30,7 @@ namespace mooncake::test {
 // Minimal MetadataStore implementation for OpLogApplier
 class MinimalMockMetadataStore : public MetadataStore {
    public:
-    bool PutMetadata(const std::string&,
-                     const StandbyObjectMetadata&) override {
+    bool PutMetadata(const std::string&, const StandbyObjectMetadata&) override {
         return true;
     }
     bool Put(const std::string&, const std::string&) override { return true; }
@@ -49,7 +48,8 @@ class MinimalMockMetadataStore : public MetadataStore {
 // we just provide a valid instance to OpLogWatcher.
 class MockOpLogApplier : public OpLogApplier {
    public:
-    MockOpLogApplier() : OpLogApplier(&metadata_store_, "test_cluster") {}
+    MockOpLogApplier()
+        : OpLogApplier(&metadata_store_, "test_cluster") {}
 
    private:
     MinimalMockMetadataStore metadata_store_;
@@ -66,11 +66,9 @@ OpLogEntry MakeEntry(uint64_t seq, OpType type, const std::string& key,
     e.op_type = type;
     e.object_key = key;
     e.payload = payload;
-    e.checksum =
-        static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
-    e.prefix_hash =
-        key.empty() ? 0
-                    : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
+    e.checksum = static_cast<uint32_t>(XXH32(payload.data(), payload.size(), 0));
+    e.prefix_hash = key.empty() ? 0
+                                 : static_cast<uint32_t>(XXH32(key.data(), key.size(), 0));
     return e;
 }
 
@@ -102,7 +100,7 @@ class OpLogWatcherTest : public ::testing::Test {
         cluster_id_ = "test_cluster_001";
         mock_applier_ = std::make_unique<MockOpLogApplier>();
         watcher_ = std::make_unique<OpLogWatcher>(etcd_endpoints_, cluster_id_,
-                                                  mock_applier_.get());
+                                                   mock_applier_.get());
     }
 
     void TearDown() override {
@@ -164,9 +162,9 @@ TEST_F(OpLogWatcherTest, TestHandleWatchEvent_Put) {
     std::string json_value = SerializeOpLogEntry(entry);
     std::string key = "/oplog/" + cluster_id_ + "/00000000000000000001";
 
-    // Use reflection to call HandleWatchEvent (it's private, so we test via
-    // public interface) For unit testing, we can't directly call
-    // HandleWatchEvent, so we skip this test and rely on integration tests
+    // Use reflection to call HandleWatchEvent (it's private, so we test via public interface)
+    // For unit testing, we can't directly call HandleWatchEvent, so we skip this test
+    // and rely on integration tests
     GTEST_SKIP() << "HandleWatchEvent is private, requires integration test";
 #else
     GTEST_SKIP() << "STORE_USE_ETCD not enabled";
@@ -208,8 +206,7 @@ TEST_F(OpLogWatcherTest, TestHandleWatchEvent_OutOfOrder) {
 
 TEST_F(OpLogWatcherTest, TestReconnectAfterDisconnect) {
 #ifdef STORE_USE_ETCD
-    GTEST_SKIP()
-        << "Requires real etcd connection and watch failure simulation";
+    GTEST_SKIP() << "Requires real etcd connection and watch failure simulation";
 #else
     GTEST_SKIP() << "STORE_USE_ETCD not enabled";
 #endif
@@ -342,8 +339,7 @@ TEST_F(OpLogWatcherTest, TestStateCallback_WatchBroken) {
 
     // Watch broken events are triggered when watch fails
     // Requires integration test with real etcd and watch failure
-    GTEST_SKIP()
-        << "Requires real etcd connection and watch failure simulation";
+    GTEST_SKIP() << "Requires real etcd connection and watch failure simulation";
 #else
     GTEST_SKIP() << "STORE_USE_ETCD not enabled";
 #endif
@@ -368,7 +364,7 @@ TEST_F(OpLogWatcherTest, TestGetLastProcessedSequenceId) {
 #ifdef STORE_USE_ETCD
     // Initially should be 0
     EXPECT_EQ(0u, watcher_->GetLastProcessedSequenceId());
-
+    
     // After processing entries, should be updated
     // This requires integration test with real etcd
     GTEST_SKIP() << "Requires real etcd connection for sequence ID tracking";
@@ -381,7 +377,7 @@ TEST_F(OpLogWatcherTest, TestIsWatchHealthy) {
 #ifdef STORE_USE_ETCD
     // Initially should be false (not started)
     EXPECT_FALSE(watcher_->IsWatchHealthy());
-
+    
     // After starting and successful watch, should be true
     // This requires integration test with real etcd
     GTEST_SKIP() << "Requires real etcd connection for watch health testing";
@@ -406,8 +402,7 @@ TEST_F(OpLogWatcherTest, TestSerializeOpLogEntry) {
 }
 
 TEST_F(OpLogWatcherTest, TestMakeEntry) {
-    OpLogEntry entry =
-        MakeEntry(100, OpType::REMOVE, "test_key", "test_payload");
+    OpLogEntry entry = MakeEntry(100, OpType::REMOVE, "test_key", "test_payload");
 
     EXPECT_EQ(100u, entry.sequence_id);
     EXPECT_EQ(OpType::REMOVE, entry.op_type);
@@ -424,3 +419,4 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+

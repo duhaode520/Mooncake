@@ -122,24 +122,35 @@ class EtcdHelper {
                             const char* value, const size_t value_size);
 
     /*
+     * @brief Get all key-value pairs with a given prefix.
+     * @param prefix: The prefix to search for.
+     * @param prefix_size: The size of the prefix in bytes.
+     * @param keys: Output param, vector of keys.
+     * @param values: Output param, vector of values.
+     * @return: Error code.
+     */
+    static ErrorCode GetWithPrefix(const char* prefix, const size_t prefix_size,
+                                    std::vector<std::string>& keys,
+                                    std::vector<std::string>& values);
+
+    /*
      * @brief Range get in etcd and return result as a JSON array string.
-     *        This avoids complex cross-language memory management for key/value
-     * arrays.
+     *        This avoids complex cross-language memory management for key/value arrays.
      * @param start_key: Start key (inclusive).
      * @param start_key_size: Size in bytes.
      * @param end_key: End key (exclusive).
      * @param end_key_size: Size in bytes.
      * @param limit: Maximum number of kvs to return (0 means no limit).
      * @param json: Output JSON string, format: [{"key":"...","value":"..."}]
-     * @param revision_id: Output etcd revision of this read
-     * (resp.Header.Revision).
+     * @param revision_id: Output etcd revision of this read (resp.Header.Revision).
      */
     static ErrorCode GetRangeAsJson(const char* start_key,
-                                    const size_t start_key_size,
-                                    const char* end_key,
-                                    const size_t end_key_size, size_t limit,
-                                    std::string& json,
-                                    EtcdRevisionId& revision_id);
+                                   const size_t start_key_size,
+                                   const char* end_key,
+                                   const size_t end_key_size,
+                                   size_t limit,
+                                   std::string& json,
+                                   EtcdRevisionId& revision_id);
 
     /*
      * @brief Get the first key with a given prefix (sorted by key).
@@ -149,8 +160,8 @@ class EtcdHelper {
      * @return: Error code. ETCD_KEY_NOT_EXIST if no key found.
      */
     static ErrorCode GetFirstKeyWithPrefix(const char* prefix,
-                                           const size_t prefix_size,
-                                           std::string& first_key);
+                                            const size_t prefix_size,
+                                            std::string& first_key);
 
     /*
      * @brief Get the last key with a given prefix (sorted by key descending).
@@ -172,25 +183,24 @@ class EtcdHelper {
      * @return: Error code.
      */
     static ErrorCode DeleteRange(const char* start_key,
-                                 const size_t start_key_size,
-                                 const char* end_key,
-                                 const size_t end_key_size);
+                                  const size_t start_key_size,
+                                  const char* end_key,
+                                  const size_t end_key_size);
 
     /*
      * @brief Watch all keys with a given prefix from a specific etcd revision.
      *        Callback includes `mod_revision` for precise resume.
-     *        (Implementation may pass max(event.ModRevision,
-     * watchResp.Header.Revision).)
-     * @param callback_func: void cb(void* ctx, const char* key, size_t
-     * key_size, const char* value, size_t value_size, int event_type, int64_t
-     * mod_revision) event_type: 0=PUT, 1=DELETE, 2=WATCH_BROKEN (watch ended;
-     * reconnect)
+     *        (Implementation may pass max(event.ModRevision, watchResp.Header.Revision).)
+     * @param callback_func: void cb(void* ctx, const char* key, size_t key_size,
+     *                              const char* value, size_t value_size,
+     *                              int event_type, int64_t mod_revision)
+     *        event_type: 0=PUT, 1=DELETE, 2=WATCH_BROKEN (watch ended; reconnect)
      */
     static ErrorCode WatchWithPrefixFromRevision(
-        const char* prefix, const size_t prefix_size,
-        EtcdRevisionId start_revision, void* callback_context,
-        void (*callback_func)(void*, const char*, size_t, const char*, size_t,
-                              int, int64_t));
+        const char* prefix, const size_t prefix_size, EtcdRevisionId start_revision,
+        void* callback_context,
+        void (*callback_func)(void*, const char*, size_t, const char*, size_t, int,
+                              int64_t));
 
     /*
      * @brief Cancel watching a prefix.
@@ -202,9 +212,8 @@ class EtcdHelper {
                                            const size_t prefix_size);
 
     /*
-     * @brief Wait until a prefix watch goroutine fully exits (no more
-     * callbacks). This should be used after CancelWatchWithPrefix to avoid
-     * shutdown races.
+     * @brief Wait until a prefix watch goroutine fully exits (no more callbacks).
+     *        This should be used after CancelWatchWithPrefix to avoid shutdown races.
      * @param timeout_ms: Wait timeout in milliseconds.
      */
     static ErrorCode WaitWatchWithPrefixStopped(const char* prefix,

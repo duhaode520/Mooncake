@@ -59,6 +59,8 @@ add_store_test(zstd_util_test zstd_util_test.cpp)
 add_store_test(local_file_backend_test local_file_backend_test.cpp)
 add_store_test(file_util_test file_util_test.cpp)
 add_store_test(snapshot_child_process_test snapshot_child_process_test.cpp)
+add_store_test(serializer_snapshot_provider_local_test serializer_snapshot_provider_local_test.cpp)
+add_store_test(ha_snapshot_backend_forced_etcd_test ha_snapshot_backend_forced_etcd_test.cpp)
 add_store_test(master_service_test_for_snapshot
                master_service_test_for_snapshot.cpp)
 add_store_test(non_ha_reconnect_test non_ha_reconnect_test.cpp)
@@ -70,6 +72,10 @@ add_store_test(task_executor_test task_executor_test.cpp)
 add_store_test(task_integration_test task_integration_test.cpp)
 add_store_test(dummy_client_get_buffer_test dummy_client_get_buffer_test.cpp)
 add_store_test(health_check_test health_check_test.cpp)
+
+# Hot Standby Unit Tests
+add_store_test(hot_standby_integration_test hot_standby_integration_test.cpp)
+
 add_subdirectory(e2e)
 
 add_executable(high_availability_test high_availability_test.cpp)

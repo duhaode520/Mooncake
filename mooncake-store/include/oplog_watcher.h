@@ -112,12 +112,13 @@ class OpLogWatcher {
         }
     }
 
-    bool ReadOpLogSince(uint64_t start_seq_id, std::vector<OpLogEntry>& entries,
-                        EtcdRevisionId& revision_id);
+    bool ReadOpLogSince(uint64_t start_seq_id,
+                       std::vector<OpLogEntry>& entries,
+                       EtcdRevisionId& revision_id);
     // Callback includes etcd KV mod_revision for precise resume.
     static void WatchCallback(void* context, const char* key, size_t key_size,
-                              const char* value, size_t value_size,
-                              int event_type, int64_t mod_revision);
+                              const char* value, size_t value_size, int event_type,
+                              int64_t mod_revision);
 
     /**
      * @brief Watch etcd OpLog changes (runs in background thread)
@@ -127,8 +128,7 @@ class OpLogWatcher {
     /**
      * @brief Process a Watch event
      * @param key etcd key
-     * @param value etcd value (JSON string for PUT events, empty for DELETE
-     * events)
+     * @param value etcd value (JSON string for PUT events, empty for DELETE events)
      * @param event_type Event type (0 = PUT, 1 = DELETE)
      */
     void HandleWatchEvent(const std::string& key, const std::string& value,
@@ -175,10 +175,10 @@ class OpLogWatcher {
     std::atomic<int> consecutive_errors_{0};
     std::atomic<int> reconnect_count_{0};
     std::atomic<bool> watch_healthy_{false};
-
+    
     // State callback for notifying HotStandbyService
     WatcherStateCallback state_callback_;
-
+    
     // Constants for error handling
     static constexpr int kMaxConsecutiveErrors = 10;
     static constexpr int kReconnectDelayMs = 1000;
@@ -187,3 +187,4 @@ class OpLogWatcher {
 };
 
 }  // namespace mooncake
+

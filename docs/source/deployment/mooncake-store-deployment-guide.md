@@ -44,6 +44,40 @@ This page summarizes useful flags, environment variables, and HTTP endpoints to 
   - `--max_total_processing_tasks` (uint32, default `10000`): Maximum number of tasks that can be processing simultaneously. When this limit is reached, no new tasks will be popped from the pending queue until some processing tasks complete.
   - `--max_retry_attempts` (uint32, default `10`): Maximum number of retry attempts for failed tasks. Tasks that fail with `NO_AVAILABLE_HANDLE` error will be retried up to this many times before being marked as failed.
 
+### HA quick usage (Master Service)
+
+1. Start an etcd cluster first.
+2. Start at least two `mooncake_master` instances with:
+   - same `--enable_ha=true`
+   - same `--etcd_endpoints` and same `--cluster_id`
+   - different `--rpc_port` (and usually different hosts)
+3. Keep `--rpc_address` as a reachable address of each master node.
+4. On clients, use etcd-based master entry in HA mode: `etcd://<ep1>;<ep2>;...`.
+
+Example (two masters):
+
+```bash
+# node A
+mooncake_master \
+  --enable_ha=true \
+  --etcd_endpoints="192.0.2.10:2379;192.0.2.11:2379" \
+  --cluster_id=prod_cluster \
+  --rpc_address=198.51.100.11 \
+  --rpc_port=50051
+
+# node B
+mooncake_master \
+  --enable_ha=true \
+  --etcd_endpoints="192.0.2.10:2379;192.0.2.11:2379" \
+  --cluster_id=prod_cluster \
+  --rpc_address=198.51.100.12 \
+  --rpc_port=50052
+```
+
+Notes:
+- In HA mode, `enable_snapshot_restore` is ignored.
+- In HA mode, snapshot backend is forced to `etcd`.
+
 - DFS Storage (optional)
   - `--root_fs_dir` (str, default empty): DFS mount directory for storage backend, used in Multi-layer Storage Support.
   - `--global_file_segment_size` (int64, default `int64_max`): Maximum available space for DFS segments.

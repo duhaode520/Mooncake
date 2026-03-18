@@ -7,8 +7,8 @@ namespace mooncake {
 StandbyStateMachine::StandbyStateMachine()
     : state_enter_time_(std::chrono::steady_clock::now()) {}
 
-StateTransitionResult StandbyStateMachine::ValidateTransition(
-    StandbyState from, StandbyEvent event) const {
+StateTransitionResult StandbyStateMachine::ValidateTransition(StandbyState from,
+                                                               StandbyEvent event) const {
     StateTransitionResult result;
     result.allowed = false;
     result.old_state = from;
@@ -130,21 +130,6 @@ StateTransitionResult StandbyStateMachine::ValidateTransition(
                     result.allowed = true;
                     result.new_state = StandbyState::SYNCING;
                     break;
-                case StandbyEvent::WATCH_HEALTHY:
-                    // Watch successfully re-established after reconnect
-                    result.allowed = true;
-                    result.new_state = StandbyState::WATCHING;
-                    break;
-                case StandbyEvent::RECOVERY_SUCCESS:
-                    // Missed entries synced — ready to watch again
-                    result.allowed = true;
-                    result.new_state = StandbyState::WATCHING;
-                    break;
-                case StandbyEvent::RECOVERY_FAILED:
-                    // Sync failed — stay in RECONNECTING and retry
-                    result.allowed = true;
-                    result.new_state = StandbyState::RECONNECTING;
-                    break;
                 case StandbyEvent::MAX_ERRORS_REACHED:
                 case StandbyEvent::FATAL_ERROR:
                     result.allowed = true;
@@ -198,9 +183,8 @@ StateTransitionResult StandbyStateMachine::ValidateTransition(
     }
 
     if (!result.allowed) {
-        result.reason = std::string("Invalid transition from ") +
-                        StandbyStateToString(from) + " on event " +
-                        StandbyEventToString(event);
+        result.reason = std::string("Invalid transition from ") + StandbyStateToString(from) +
+                        " on event " + StandbyEventToString(event);
     }
 
     return result;
@@ -242,8 +226,7 @@ StateTransitionResult StandbyStateMachine::ProcessEvent(StandbyEvent event) {
         current_state_.store(result.new_state, std::memory_order_release);
         state_enter_time_ = record.timestamp;
 
-        LOG(INFO) << "Standby state transition: "
-                  << StandbyStateToString(old_state) << " -> "
+        LOG(INFO) << "Standby state transition: " << StandbyStateToString(old_state) << " -> "
                   << StandbyStateToString(result.new_state)
                   << " (event: " << StandbyEventToString(event) << ")";
 
@@ -270,23 +253,22 @@ void StandbyStateMachine::RegisterCallback(StateChangeCallback callback) {
     callbacks_.push_back(std::move(callback));
 }
 
-std::vector<StandbyStateMachine::TransitionRecord>
-StandbyStateMachine::GetTransitionHistory(size_t max_records) const {
+std::vector<StandbyStateMachine::TransitionRecord> StandbyStateMachine::GetTransitionHistory(
+    size_t max_records) const {
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (transition_history_.size() <= max_records) {
         return transition_history_;
     }
 
-    return std::vector<TransitionRecord>(
-        transition_history_.end() - max_records, transition_history_.end());
+    return std::vector<TransitionRecord>(transition_history_.end() - max_records,
+                                         transition_history_.end());
 }
 
 std::chrono::milliseconds StandbyStateMachine::GetTimeInCurrentState() const {
-    std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - state_enter_time_);
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now - state_enter_time_);
 }
 
 int StandbyStateMachine::IncrementErrors() {
@@ -299,3 +281,4 @@ int StandbyStateMachine::IncrementErrors() {
 }
 
 }  // namespace mooncake
+

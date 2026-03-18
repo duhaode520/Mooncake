@@ -34,7 +34,8 @@ struct HotStandbyConfig {
     uint32_t replication_port{0};
     uint32_t verification_interval_sec{30};
     uint32_t max_replication_lag_entries{1000};
-    bool enable_verification{true};
+    // 默认关闭数据校验线程，如需开启请显式将 enable_verification 设为 true
+    bool enable_verification{false};
 
     // Snapshot bootstrap (optional):
     // If provided, Standby will try to load a snapshot first, then replay OpLog
@@ -75,8 +76,7 @@ class HotStandbyService {
 
     /**
      * @brief Start connecting to Primary and begin replication
-     * @param primary_address Address of the Primary Master (not used with
-     * etcd-based sync)
+     * @param primary_address Address of the Primary Master (not used with etcd-based sync)
      * @param etcd_endpoints Comma-separated etcd endpoints
      * @param cluster_id Cluster identifier for OpLog path
      * @return ErrorCode::OK on success
@@ -120,10 +120,10 @@ class HotStandbyService {
 
     /**
      * @brief Get the latest applied sequence ID after promotion
-     *
+     * 
      * This should be called after Promote() to get the sequence_id
      * that the new Primary's OpLogManager should start from.
-     *
+     * 
      * @return Latest applied sequence ID, or 0 if not available
      */
     uint64_t GetLatestAppliedSequenceId() const;
@@ -145,9 +145,7 @@ class HotStandbyService {
     /**
      * @brief Get state machine for monitoring/debugging
      */
-    const StandbyStateMachine& GetStateMachine() const {
-        return state_machine_;
-    }
+    const StandbyStateMachine& GetStateMachine() const { return state_machine_; }
 
     /**
      * @brief Callback for OpLogWatcher state changes
@@ -207,16 +205,14 @@ class HotStandbyService {
 
         // Snapshot for promotion/restore.
         void Snapshot(
-            std::vector<std::pair<std::string, StandbyObjectMetadata>>& out)
-            const;
+            std::vector<std::pair<std::string, StandbyObjectMetadata>>& out) const;
 
        private:
         mutable std::mutex mutex_;
         std::unordered_map<std::string, StandbyObjectMetadata> store_;
     };
     std::unique_ptr<StandbyMetadataStore> metadata_store_;
-    std::unique_ptr<SnapshotProvider> snapshot_provider_{
-        std::make_unique<NoopSnapshotProvider>()};
+    std::unique_ptr<SnapshotProvider> snapshot_provider_;
 
     // OpLog replication components
     std::unique_ptr<OpLogApplier> oplog_applier_;
@@ -247,3 +243,4 @@ class HotStandbyService {
 };
 
 }  // namespace mooncake
+

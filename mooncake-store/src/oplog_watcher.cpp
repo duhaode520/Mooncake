@@ -24,9 +24,7 @@ namespace mooncake {
 
 OpLogWatcher::OpLogWatcher(const std::string& etcd_endpoints,
                            const std::string& cluster_id, OpLogApplier* applier)
-    : etcd_endpoints_(etcd_endpoints),
-      cluster_id_(cluster_id),
-      applier_(applier) {
+    : etcd_endpoints_(etcd_endpoints), cluster_id_(cluster_id), applier_(applier) {
     if (applier_ == nullptr) {
         LOG(FATAL) << "OpLogApplier cannot be null";
     }
@@ -35,9 +33,8 @@ OpLogWatcher::OpLogWatcher(const std::string& etcd_endpoints,
         cluster_id_.pop_back();
     }
     if (!cluster_id_.empty() && !IsValidClusterIdComponent(cluster_id_)) {
-        LOG(FATAL)
-            << "Invalid cluster_id for OpLogWatcher: '" << cluster_id_
-            << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
+        LOG(FATAL) << "Invalid cluster_id for OpLogWatcher: '" << cluster_id_
+                   << "'. Allowed chars: [A-Za-z0-9_.-], max_len=128, no slashes.";
     }
 
 #ifdef STORE_USE_ETCD
@@ -85,9 +82,8 @@ bool OpLogWatcher::StartFromSequenceId(uint64_t start_seq_id) {
         std::vector<OpLogEntry> batch;
         EtcdRevisionId rev = 0;
         if (!ReadOpLogSince(read_seq_id, batch, rev)) {
-            LOG(ERROR) << "ReadOpLogSince failed during initial sync"
-                       << ", read_seq_id=" << read_seq_id;
-            return false;
+            last_read_rev = 0;
+            break;
         }
         last_read_rev = rev;
         if (!batch.empty()) {
@@ -144,8 +140,7 @@ void OpLogWatcher::Stop() {
 
     // 3. Cancel the Go goroutine and wait for it to fully exit.
     std::string watch_prefix = "/oplog/" + cluster_id_ + "/";
-    ErrorCode err = EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(),
-                                                      watch_prefix.size());
+    ErrorCode err = EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(), watch_prefix.size());
     if (err != ErrorCode::OK) {
         LOG(WARNING) << "Failed to cancel watch for prefix " << watch_prefix
                      << ", error=" << static_cast<int>(err);
@@ -178,8 +173,8 @@ void OpLogWatcher::Stop() {
 }
 
 bool OpLogWatcher::ReadOpLogSince(uint64_t start_seq_id,
-                                  std::vector<OpLogEntry>& entries,
-                                  EtcdRevisionId& revision_id) {
+                                 std::vector<OpLogEntry>& entries,
+                                 EtcdRevisionId& revision_id) {
 #ifdef STORE_USE_ETCD
     if (!op_log_store_) {
         return false;
@@ -246,8 +241,7 @@ void OpLogWatcher::WatchOpLog() {
     while (running_.load()) {
         // Cancel any existing watch before starting a new one
         // This prevents "prefix already being watched" errors
-        (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(),
-                                                watch_prefix.size());
+        (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(), watch_prefix.size());
         (void)EtcdHelper::WaitWatchWithPrefixStopped(watch_prefix.c_str(),
                                                      watch_prefix.size(),
                                                      /*timeout_ms=*/5000);
@@ -256,8 +250,7 @@ void OpLogWatcher::WatchOpLog() {
         // Go goroutine can safely check watcher liveness via mutex.
         EtcdRevisionId start_rev =
             static_cast<EtcdRevisionId>(next_watch_revision_.load());
-        // Use watcher with mod_revision so we can update next_watch_revision_
-        // precisely.
+        // Use watcher with mod_revision so we can update next_watch_revision_ precisely.
         ErrorCode err = EtcdHelper::WatchWithPrefixFromRevision(
             watch_prefix.c_str(), watch_prefix.size(), start_rev,
             watch_callback_ctx_, WatchCallback);
@@ -267,11 +260,10 @@ void OpLogWatcher::WatchOpLog() {
                        << ", error=" << static_cast<int>(err);
             watch_healthy_.store(false);
             NotifyStateEvent(StandbyEvent::WATCH_BROKEN);
-
-            // Wait a bit longer before retrying, to ensure old goroutines have
-            // time to exit
+            
+            // Wait a bit longer before retrying, to ensure old goroutines have time to exit
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
+            
             // Try to reconnect
             TryReconnect();
             continue;
@@ -283,31 +275,28 @@ void OpLogWatcher::WatchOpLog() {
         NotifyStateEvent(StandbyEvent::WATCH_HEALTHY);
 
         // The watch is now running in the background (via Go goroutine)
-        // We just need to keep the thread alive until Stop() is called or watch
-        // fails
+        // We just need to keep the thread alive until Stop() is called or watch fails
         while (running_.load() && watch_healthy_.load()) {
-            // Drive pending/missing handling even when no new watch events
-            // arrive. Without this, a single out-of-order arrival could park
-            // entries in pending_entries_ forever if the missing entry isn't
-            // delivered via watch (but exists in etcd and could be fetched).
+            // Drive pending/missing handling even when no new watch events arrive.
+            // Without this, a single out-of-order arrival could park entries in
+            // pending_entries_ forever if the missing entry isn't delivered via watch
+            // (but exists in etcd and could be fetched).
             (void)applier_->ProcessPendingEntries();
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
+            
             // Periodically check watch health
             if (consecutive_errors_.load() >= kMaxConsecutiveErrors) {
-                LOG(WARNING)
-                    << "Too many consecutive errors ("
-                    << consecutive_errors_.load() << "), reconnecting watch...";
+                LOG(WARNING) << "Too many consecutive errors (" << consecutive_errors_.load()
+                            << "), reconnecting watch...";
                 watch_healthy_.store(false);
                 NotifyStateEvent(StandbyEvent::MAX_ERRORS_REACHED);
                 break;
             }
         }
-
+        
         if (running_.load() && !watch_healthy_.load()) {
             // Cancel current watch before reconnecting
-            (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(),
-                                                    watch_prefix.size());
+            (void)EtcdHelper::CancelWatchWithPrefix(watch_prefix.c_str(), watch_prefix.size());
             (void)EtcdHelper::WaitWatchWithPrefixStopped(watch_prefix.c_str(),
                                                          watch_prefix.size(),
                                                          /*timeout_ms=*/5000);
@@ -327,25 +316,23 @@ void OpLogWatcher::TryReconnect() {
     if (!running_.load()) {
         return;
     }
-
+    
     int reconnect_attempt = reconnect_count_.fetch_add(1) + 1;
-
+    
     // Calculate delay with exponential backoff
-    int delay_ms =
-        std::min(kReconnectDelayMs * reconnect_attempt, kMaxReconnectDelayMs);
-
+    int delay_ms = std::min(kReconnectDelayMs * reconnect_attempt, kMaxReconnectDelayMs);
+    
     LOG(INFO) << "Attempting to reconnect watch (attempt #" << reconnect_attempt
               << "), waiting " << delay_ms << "ms...";
-
+    
     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-
+    
     // Sync any missed entries before resuming watch
     if (SyncMissedEntries()) {
         LOG(INFO) << "Successfully synced missed OpLog entries";
         NotifyStateEvent(StandbyEvent::RECOVERY_SUCCESS);
     } else {
-        LOG(WARNING)
-            << "Failed to sync missed OpLog entries, continuing anyway";
+        LOG(WARNING) << "Failed to sync missed OpLog entries, continuing anyway";
         NotifyStateEvent(StandbyEvent::RECOVERY_FAILED);
     }
 }
@@ -357,67 +344,52 @@ bool OpLogWatcher::SyncMissedEntries() {
         // No entries processed yet, nothing to sync
         return true;
     }
-
+    
     LOG(INFO) << "Syncing missed OpLog entries since sequence_id=" << last_seq;
-
-    uint64_t read_seq_id = last_seq;
-    EtcdRevisionId last_read_rev = 0;
-    size_t total_applied = 0;
-
-    for (;;) {
-        std::vector<OpLogEntry> batch;
-        EtcdRevisionId rev = 0;
-        if (!ReadOpLogSince(read_seq_id, batch, rev)) {
-            LOG(ERROR) << "Failed to read missed OpLog entries";
-            return false;
-        }
-        if (rev > 0) {
-            last_read_rev = rev;
-        }
-        if (!batch.empty()) {
-            for (const auto& entry : batch) {
-                if (applier_->ApplyOpLogEntry(entry)) {
-                    last_processed_sequence_id_.store(entry.sequence_id);
-                    read_seq_id = entry.sequence_id;
-                    total_applied++;
-                } else {
-                    LOG(WARNING)
-                        << "Failed to apply missed OpLog entry, sequence_id="
+    
+    std::vector<OpLogEntry> entries;
+    EtcdRevisionId rev = 0;
+    if (!ReadOpLogSince(last_seq, entries, rev)) {
+        LOG(ERROR) << "Failed to read missed OpLog entries";
+        return false;
+    }
+    if (rev > 0) {
+        next_watch_revision_.store(static_cast<int64_t>(rev + 1));
+    }
+    
+    if (entries.empty()) {
+        LOG(INFO) << "No missed OpLog entries to sync";
+        return true;
+    }
+    
+    LOG(INFO) << "Syncing " << entries.size() << " missed OpLog entries";
+    
+    for (const auto& entry : entries) {
+        if (applier_->ApplyOpLogEntry(entry)) {
+            last_processed_sequence_id_.store(entry.sequence_id);
+        } else {
+            LOG(WARNING) << "Failed to apply missed OpLog entry, sequence_id="
                         << entry.sequence_id;
-                }
-            }
-        }
-        if (batch.size() < kSyncBatchSize) {
-            break;
         }
     }
-
-    if (last_read_rev > 0) {
-        next_watch_revision_.store(static_cast<int64_t>(last_read_rev + 1));
-    }
-
-    LOG(INFO) << "Synced " << total_applied << " missed OpLog entries";
-
+    
     return true;
 #else
     return false;
 #endif
 }
 
-void OpLogWatcher::HandleWatchEvent(const std::string& key,
-                                    const std::string& value, int event_type) {
+void OpLogWatcher::HandleWatchEvent(const std::string& key, const std::string& value,
+                                    int event_type) {
     HandleWatchEvent(key, value, event_type, /*mod_revision=*/0);
 }
 
-void OpLogWatcher::HandleWatchEvent(const std::string& key,
-                                    const std::string& value, int event_type,
-                                    int64_t mod_revision) {
+void OpLogWatcher::HandleWatchEvent(const std::string& key, const std::string& value,
+                                    int event_type, int64_t mod_revision) {
     // event_type:
-    // 0 = PUT, 1 = DELETE, 2 = WATCH_BROKEN (Go watcher terminated; should
-    // reconnect)
+    // 0 = PUT, 1 = DELETE, 2 = WATCH_BROKEN (Go watcher terminated; should reconnect)
     if (event_type == 2) {
-        LOG(WARNING) << "OpLog watch broken, will reconnect. cluster_id="
-                     << cluster_id_
+        LOG(WARNING) << "OpLog watch broken, will reconnect. cluster_id=" << cluster_id_
                      << ", next_watch_revision=" << next_watch_revision_.load()
                      << ", last_seq=" << last_processed_sequence_id_.load();
         watch_healthy_.store(false);
@@ -443,8 +415,7 @@ void OpLogWatcher::HandleWatchEvent(const std::string& key,
     }
 
     if (event_type != 0) {
-        LOG(WARNING) << "Unknown event type: " << event_type
-                     << " for key: " << key;
+        LOG(WARNING) << "Unknown event type: " << event_type << " for key: " << key;
         consecutive_errors_.fetch_add(1);
         return;
     }
@@ -463,23 +434,20 @@ void OpLogWatcher::HandleWatchEvent(const std::string& key,
         return;
     }
 
-    // Basic DoS protection: validate key/payload sizes before further
-    // processing.
+    // Basic DoS protection: validate key/payload sizes before further processing.
     std::string size_reason;
     if (!OpLogManager::ValidateEntrySize(entry, &size_reason)) {
-        LOG(ERROR) << "OpLog entry size rejected: sequence_id="
-                   << entry.sequence_id << ", key=" << entry.object_key
-                   << ", reason=" << size_reason;
+        LOG(ERROR) << "OpLog entry size rejected: sequence_id=" << entry.sequence_id
+                   << ", key=" << entry.object_key << ", reason=" << size_reason;
         consecutive_errors_.fetch_add(1);
         return;
     }
 
     // Verify checksum to detect data corruption or tampering.
     if (!OpLogManager::VerifyChecksum(entry)) {
-        LOG(ERROR)
-            << "OpLog entry checksum mismatch: sequence_id="
-            << entry.sequence_id << ", key=" << entry.object_key
-            << ". Possible data corruption or tampering. Discarding entry.";
+        LOG(ERROR) << "OpLog entry checksum mismatch: sequence_id=" << entry.sequence_id
+                   << ", key=" << entry.object_key
+                   << ". Possible data corruption or tampering. Discarding entry.";
         consecutive_errors_.fetch_add(1);
         HAMetricManager::instance().inc_oplog_checksum_failures();
         return;
@@ -487,13 +455,12 @@ void OpLogWatcher::HandleWatchEvent(const std::string& key,
 
     // Apply the OpLog entry
     if (applier_->ApplyOpLogEntry(entry)) {
-        // last_processed_sequence_id_ must be monotonic. We may "consume"
-        // duplicate / already-applied entries (entry.sequence_id < expected) as
-        // no-ops, so never regress this counter.
+        // last_processed_sequence_id_ must be monotonic. We may "consume" duplicate
+        // / already-applied entries (entry.sequence_id < expected) as no-ops, so
+        // never regress this counter.
         uint64_t cur = last_processed_sequence_id_.load();
         while (IsSequenceNewer(entry.sequence_id, cur) &&
-               !last_processed_sequence_id_.compare_exchange_weak(
-                   cur, entry.sequence_id)) {
+               !last_processed_sequence_id_.compare_exchange_weak(cur, entry.sequence_id)) {
             // retry
         }
         consecutive_errors_.store(0);  // Reset error counter on success
@@ -525,7 +492,7 @@ bool OpLogWatcher::DeserializeOpLogEntry(const std::string& json_str,
     entry.timestamp_ms = root.get("timestamp_ms", 0).asUInt64();
     entry.op_type = static_cast<OpType>(root.get("op_type", 0).asInt());
     entry.object_key = root.get("object_key", "").asString();
-
+    
     // CRITICAL: Base64 decode payload to restore binary data
     std::string encoded_payload = root.get("payload", "").asString();
     entry.payload = base64::Decode(encoded_payload);
@@ -543,13 +510,13 @@ namespace mooncake {
 
 OpLogWatcher::OpLogWatcher(const std::string& etcd_endpoints,
                            const std::string& cluster_id, OpLogApplier* applier)
-    : etcd_endpoints_(etcd_endpoints),
-      cluster_id_(cluster_id),
-      applier_(applier) {
+    : etcd_endpoints_(etcd_endpoints), cluster_id_(cluster_id), applier_(applier) {
     LOG(FATAL) << "OpLogWatcher requires STORE_USE_ETCD to be enabled";
 }
 
-OpLogWatcher::~OpLogWatcher() { Stop(); }
+OpLogWatcher::~OpLogWatcher() {
+    Stop();
+}
 
 void OpLogWatcher::Start() {
     LOG(FATAL) << "OpLogWatcher requires STORE_USE_ETCD to be enabled";
@@ -579,14 +546,13 @@ void OpLogWatcher::WatchOpLog() {
     LOG(FATAL) << "OpLogWatcher requires STORE_USE_ETCD to be enabled";
 }
 
-void OpLogWatcher::HandleWatchEvent(const std::string& key,
-                                    const std::string& value, int event_type) {
+void OpLogWatcher::HandleWatchEvent(const std::string& key, const std::string& value,
+                                    int event_type) {
     LOG(FATAL) << "OpLogWatcher requires STORE_USE_ETCD to be enabled";
 }
 
-void OpLogWatcher::HandleWatchEvent(const std::string& key,
-                                    const std::string& value, int event_type,
-                                    int64_t mod_revision) {
+void OpLogWatcher::HandleWatchEvent(const std::string& key, const std::string& value,
+                                    int event_type, int64_t mod_revision) {
     (void)key;
     (void)value;
     (void)event_type;
@@ -606,3 +572,4 @@ bool OpLogWatcher::SyncMissedEntries() {
 }  // namespace mooncake
 
 #endif  // STORE_USE_ETCD
+

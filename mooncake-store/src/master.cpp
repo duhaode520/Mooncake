@@ -590,6 +590,27 @@ int main(int argc, char* argv[]) {
     }
     LoadConfigFromCmdline(master_config, !conf_path.empty());
 
+    // Parameter precedence:
+    // - In HA mode, primary master does NOT restore from snapshot backend.
+    //   Standby nodes handle snapshot bootstrap via HotStandbyService.
+    //   Therefore `enable_snapshot_restore` is ignored when enable_ha=true.
+    if (master_config.enable_ha) {
+        if (master_config.enable_snapshot_restore) {
+            LOG(WARNING) << "enable_snapshot_restore is ignored in HA mode; forcing it to false";
+        }
+        master_config.enable_snapshot_restore = false;
+
+        // HA mode snapshot backend policy:
+        // - All snapshot data must be shared by all nodes.
+        // - Enforce ETCD backend; ignore `--snapshot_backend` or config file.
+        if (master_config.snapshot_backend_type != "etcd" &&
+            master_config.snapshot_backend_type != "ETCD") {
+            LOG(WARNING) << "snapshot_backend is ignored in HA mode; forcing it to 'etcd' (was: "
+                         << master_config.snapshot_backend_type << ")";
+        }
+        master_config.snapshot_backend_type = "etcd";
+    }
+
     if (master_config.enable_ha && master_config.etcd_endpoints.empty()) {
         LOG(FATAL) << "Etcd endpoints must be set when enable_ha is true";
         return 1;

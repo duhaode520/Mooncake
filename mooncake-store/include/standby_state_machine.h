@@ -15,35 +15,32 @@ namespace mooncake {
  * State transition diagram:
  *
  *     ┌─────────┐
- *     │ STOPPED │◄───────────────────────────────────────┐
- *     └────┬────┘                                        │
- *          │ Start()                                     │ Stop()/Error
- *          ▼                                             │
- *     ┌─────────────┐                                    │
- *     │ CONNECTING  │                                    │
- *     └──────┬──────┘                                    │
- *            │ Connected                                 │
- *            ▼                              Connected    │
- *     ┌─────────────┐ Error/Disconnect ┌────────────┐    │
- *     │   SYNCING   │────────────────► │RECONNECTING│────┤
- *     └──────┬──────┘◄──────────────── └──────┬─────┘    │
- *            │ Sync complete               ▲  │          │
- *            ▼                             │  │Watch     │
- *     ┌─────────────┐  Watch broken/   ────┘  │healthy   │
- *     │  WATCHING   │── Disconnect            │          │
- *     └──────┬──────┘◄────────────────────────┘          │
- *            │         Max errors      ┌────────────┐    │
- *            │────────────────────────►│ RECOVERING │────┤
- *            │                         └────────────┘    │
- *            │ Promote()                                 │
- *            ▼                                           │
- *     ┌─────────────┐                                    │
- *     │  PROMOTING  │────────────────────────────────────┤
- *     └──────┬──────┘                                    │
- *            │ Success                                   │
- *            ▼                                           │
- *     ┌─────────────┐                                    │
- *     │  PROMOTED   │────────────────────────────────────┘
+ *     │ STOPPED │◄──────────────────────────────────────┐
+ *     └────┬────┘                                       │
+ *          │ Start()                                    │ Stop()/Error
+ *          ▼                                            │
+ *     ┌─────────────┐                                   │
+ *     │ CONNECTING  │◄──────────────────────┐           │
+ *     └──────┬──────┘                       │           │
+ *            │ Connected                    │ Reconnect │
+ *            ▼                              │           │
+ *     ┌─────────────┐    Error/Gap     ┌────┴─────┐     │
+ *     │   SYNCING   │─────────────────►│RECOVERING│─────┤
+ *     └──────┬──────┘                  └──────────┘     │
+ *            │ Sync complete                            │
+ *            ▼                                          │
+ *     ┌─────────────┐    Watch broken  ┌────────────┐   │
+ *     │  WATCHING   │─────────────────►│RECONNECTING│───┤
+ *     └──────┬──────┘                  └────────────┘   │
+ *            │ Promote()                                │
+ *            ▼                                          │
+ *     ┌─────────────┐                                   │
+ *     │  PROMOTING  │───────────────────────────────────┤
+ *     └──────┬──────┘                                   │
+ *            │ Success                                  │
+ *            ▼                                          │
+ *     ┌─────────────┐                                   │
+ *     │  PROMOTED   │───────────────────────────────────┘
  *     └─────────────┘
  */
 enum class StandbyState : uint8_t {
@@ -108,34 +105,34 @@ inline const char* StandbyStateToString(StandbyState state) {
  */
 enum class StandbyEvent : uint8_t {
     // User/system actions
-    START,    // Start() called
-    STOP,     // Stop() called
-    PROMOTE,  // Promote() called
+    START,   // Start() called
+    STOP,    // Stop() called
+    PROMOTE, // Promote() called
 
     // Connection events
-    CONNECTED,          // Successfully connected to etcd
-    CONNECTION_FAILED,  // Failed to connect to etcd
-    DISCONNECTED,       // Connection lost
+    CONNECTED,         // Successfully connected to etcd
+    CONNECTION_FAILED, // Failed to connect to etcd
+    DISCONNECTED,      // Connection lost
 
     // Sync events
-    SYNC_COMPLETE,  // Initial sync completed
-    SYNC_FAILED,    // Sync failed
+    SYNC_COMPLETE, // Initial sync completed
+    SYNC_FAILED,   // Sync failed
 
     // Watch events
-    WATCH_HEALTHY,  // Watch is healthy and receiving events
-    WATCH_BROKEN,   // Watch connection broken
+    WATCH_HEALTHY, // Watch is healthy and receiving events
+    WATCH_BROKEN,  // Watch connection broken
 
     // Recovery events
-    RECOVERY_SUCCESS,  // Successfully recovered from error
-    RECOVERY_FAILED,   // Recovery failed
+    RECOVERY_SUCCESS, // Successfully recovered from error
+    RECOVERY_FAILED,  // Recovery failed
 
     // Promotion events
-    PROMOTION_SUCCESS,  // Successfully promoted
-    PROMOTION_FAILED,   // Promotion failed
+    PROMOTION_SUCCESS, // Successfully promoted
+    PROMOTION_FAILED,  // Promotion failed
 
     // Error events
-    MAX_ERRORS_REACHED,  // Too many consecutive errors
-    FATAL_ERROR,         // Unrecoverable error
+    MAX_ERRORS_REACHED, // Too many consecutive errors
+    FATAL_ERROR,        // Unrecoverable error
 };
 
 inline const char* StandbyEventToString(StandbyEvent event) {
@@ -190,8 +187,8 @@ struct StateTransitionResult {
 /**
  * @brief Callback for state transition notifications
  */
-using StateChangeCallback = std::function<void(
-    StandbyState old_state, StandbyState new_state, StandbyEvent event)>;
+using StateChangeCallback =
+    std::function<void(StandbyState old_state, StandbyState new_state, StandbyEvent event)>;
 
 /**
  * @brief Standby State Machine
@@ -206,9 +203,7 @@ class StandbyStateMachine {
     /**
      * @brief Get current state (thread-safe)
      */
-    StandbyState GetState() const {
-        return current_state_.load(std::memory_order_acquire);
-    }
+    StandbyState GetState() const { return current_state_.load(std::memory_order_acquire); }
 
     /**
      * @brief Check if in a specific state
@@ -216,14 +211,14 @@ class StandbyStateMachine {
     bool IsInState(StandbyState state) const { return GetState() == state; }
 
     /**
-     * @brief Check if service is running (SYNCING, WATCHING, RECOVERING,
-     * RECONNECTING, PROMOTING)
+     * @brief Check if service is running (SYNCING, WATCHING, RECOVERING, RECONNECTING,
+     * PROMOTING)
      */
     bool IsRunning() const {
         StandbyState s = GetState();
         return s == StandbyState::SYNCING || s == StandbyState::WATCHING ||
-               s == StandbyState::RECOVERING ||
-               s == StandbyState::RECONNECTING || s == StandbyState::PROMOTING;
+               s == StandbyState::RECOVERING || s == StandbyState::RECONNECTING ||
+               s == StandbyState::PROMOTING;
     }
 
     /**
@@ -243,9 +238,7 @@ class StandbyStateMachine {
     /**
      * @brief Check if ready for promotion
      */
-    bool IsReadyForPromotion() const {
-        return GetState() == StandbyState::WATCHING;
-    }
+    bool IsReadyForPromotion() const { return GetState() == StandbyState::WATCHING; }
 
     /**
      * @brief Process an event and perform state transition
@@ -272,8 +265,7 @@ class StandbyStateMachine {
     /**
      * @brief Get state transition history (for debugging)
      */
-    std::vector<TransitionRecord> GetTransitionHistory(
-        size_t max_records = 100) const;
+    std::vector<TransitionRecord> GetTransitionHistory(size_t max_records = 100) const;
 
     /**
      * @brief Get time spent in current state
@@ -319,14 +311,12 @@ class StandbyStateMachine {
     /**
      * @brief Check if a transition is valid and get new state
      */
-    StateTransitionResult ValidateTransition(StandbyState from,
-                                             StandbyEvent event) const;
+    StateTransitionResult ValidateTransition(StandbyState from, StandbyEvent event) const;
 
     /**
      * @brief Notify all registered callbacks
      */
-    void NotifyCallbacks(StandbyState old_state, StandbyState new_state,
-                         StandbyEvent event);
+    void NotifyCallbacks(StandbyState old_state, StandbyState new_state, StandbyEvent event);
 
     std::atomic<StandbyState> current_state_{StandbyState::STOPPED};
     std::atomic<int> consecutive_errors_{0};
@@ -341,3 +331,4 @@ class StandbyStateMachine {
 };
 
 }  // namespace mooncake
+
