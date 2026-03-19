@@ -237,7 +237,8 @@ MasterService::MasterService(const MasterServiceConfig& config)
     if (enable_snapshot_ || enable_snapshot_restore_) {
         try {
             snapshot_backend_type_ = config.snapshot_backend_type;
-            snapshot_backend_ = SerializerBackend::Create(snapshot_backend_type_, config.etcd_endpoints);
+            snapshot_backend_ = SerializerBackend::Create(
+                snapshot_backend_type_, config.etcd_endpoints);
         } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to create snapshot backend: " << e.what();
             throw std::runtime_error(
@@ -482,8 +483,7 @@ void MasterService::RestoreFromStandbySnapshot(
     }
 
     LOG(INFO) << "Restored metadata from standby snapshot: restored_keys="
-              << restored
-              << ", restored_mem_size=" << total_restored_mem_size
+              << restored << ", restored_mem_size=" << total_restored_mem_size
               << ", initial_oplog_sequence_id=" << initial_oplog_sequence_id;
 }
 
@@ -890,7 +890,8 @@ void MasterService::ClearInvalidHandles() {
             // that excludes those MEMORY replicas (Scheme A).
             if (CleanupStaleHandles(it->second)) {
                 // No replicas remain after cleanup -> key should be deleted.
-                // Also erase from processing_keys, replication_tasks, and offloading_tasks.
+                // Also erase from processing_keys, replication_tasks, and
+                // offloading_tasks.
 #ifdef STORE_USE_ETCD
                 if (enable_ha_) {
                     AppendOrPersistOrEnqueue(
@@ -3133,7 +3134,8 @@ MasterService::SerializeState(const std::string& snapshot_id, bool hold_lock) {
             auto task_manager_result = task_manager_serializer.Serialize();
             if (!task_manager_result) {
                 SNAP_LOG_ERROR(
-                    "[Snapshot] task manager serialization failed, snapshot_id={}, "
+                    "[Snapshot] task manager serialization failed, "
+                    "snapshot_id={}, "
                     "code={}, msg={}",
                     snapshot_id,
                     static_cast<int>(task_manager_result.error().code),
@@ -3181,9 +3183,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
     try {
         auto SNAPSHOT_SERIALIZER_TYPE = "messagepack";
 
-        SNAP_LOG_INFO(
-            "[Snapshot] action=upload_snapshot start, snapshot_id={}",
-            snapshot_id);
+        SNAP_LOG_INFO("[Snapshot] action=upload_snapshot start, snapshot_id={}",
+                      snapshot_id);
 
         // Create storage path prefix
         std::string path_prefix = SNAPSHOT_ROOT + "/" + snapshot_id + "/";
@@ -3193,8 +3194,7 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
                 "[Snapshot] snapshot_backend_ is null, snapshot_id={}",
                 snapshot_id);
             return tl::make_unexpected(SerializationError(
-                ErrorCode::INTERNAL_ERROR,
-                "Snapshot backend not initialized"));
+                ErrorCode::INTERNAL_ERROR, "Snapshot backend not initialized"));
         }
         SNAP_LOG_INFO("[Snapshot] Backend info: {}",
                       snapshot_backend_->GetConnectionInfo());
@@ -3219,7 +3219,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
                 std::chrono::system_clock::now().time_since_epoch())
                 .count();
 
-        // Format: protocol|version|snapshot_id|meta_size|meta_crc|seg_size|seg_crc|timestamp|status|oplog_seq_id
+        // Format:
+        // protocol|version|snapshot_id|meta_size|meta_crc|seg_size|seg_crc|timestamp|status|oplog_seq_id
         std::string manifest_content = fmt::format(
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}", SNAPSHOT_SERIALIZER_TYPE,
             SNAPSHOT_SERIALIZER_VERSION, snapshot_id, meta_size, meta_crc,
@@ -3274,8 +3275,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
                     "Failed to save segments to staging file: " +
                         save_result.error()));
             }
-            save_result = FileUtil::SaveBinaryToFile(
-                snapshot_data.task_manager, task_manager_file);
+            save_result = FileUtil::SaveBinaryToFile(snapshot_data.task_manager,
+                                                     task_manager_file);
             if (!save_result) {
                 return tl::make_unexpected(SerializationError(
                     ErrorCode::PERSISTENT_FAIL,
@@ -3332,17 +3333,16 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
         } else {
             // Individual uploads for LOCAL/S3 backends (non-atomic fallback)
             // Upload core snapshot files first
-            auto upload_result = UploadSnapshotFile(
-                snapshot_data.metadata, metadata_path,
-                SNAPSHOT_METADATA_FILE, snapshot_id);
+            auto upload_result =
+                UploadSnapshotFile(snapshot_data.metadata, metadata_path,
+                                   SNAPSHOT_METADATA_FILE, snapshot_id);
             if (!upload_result) {
                 return tl::make_unexpected(upload_result.error());
             }
 
-            upload_result = UploadSnapshotFile(snapshot_data.segments,
-                                               segment_path,
-                                               SNAPSHOT_SEGMENTS_FILE,
-                                               snapshot_id);
+            upload_result =
+                UploadSnapshotFile(snapshot_data.segments, segment_path,
+                                   SNAPSHOT_SEGMENTS_FILE, snapshot_id);
             if (!upload_result) {
                 return tl::make_unexpected(upload_result.error());
             }
@@ -3388,9 +3388,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
         }
 
         CleanupOldSnapshot(snapshot_retention_count_, snapshot_id);
-        SNAP_LOG_INFO(
-            "[Snapshot] action=upload_snapshot end, snapshot_id={}",
-            snapshot_id);
+        SNAP_LOG_INFO("[Snapshot] action=upload_snapshot end, snapshot_id={}",
+                      snapshot_id);
     } catch (const std::exception& e) {
         SNAP_LOG_ERROR(
             "[Snapshot] Exception during upload_snapshot, snapshot_id={}, "
@@ -3417,9 +3416,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
 // ---------------------------------------------------------------------------
 tl::expected<void, SerializationError> MasterService::PersistState(
     const std::string& snapshot_id, uint64_t* out_seq_id) {
-    SNAP_LOG_INFO(
-        "[Snapshot] action=persisting_state start, snapshot_id={}",
-        snapshot_id);
+    SNAP_LOG_INFO("[Snapshot] action=persisting_state start, snapshot_id={}",
+                  snapshot_id);
 
     auto serialize_result = SerializeState(snapshot_id);
     if (!serialize_result) {
@@ -3436,9 +3434,8 @@ tl::expected<void, SerializationError> MasterService::PersistState(
         return tl::make_unexpected(upload_result.error());
     }
 
-    SNAP_LOG_INFO(
-        "[Snapshot] action=persisting_state end, snapshot_id={}",
-        snapshot_id);
+    SNAP_LOG_INFO("[Snapshot] action=persisting_state end, snapshot_id={}",
+                  snapshot_id);
     return {};
 }
 
@@ -3729,8 +3726,7 @@ void MasterService::RestoreState() {
             if (!download_result) {
                 LOG(WARNING)
                     << "[Restore] Failed to download task manager file: "
-                    << task_manager_path
-                    << " error=" << download_result.error()
+                    << task_manager_path << " error=" << download_result.error()
                     << " (may not exist in older snapshots, skipping)";
                 task_manager_content.clear();
             }
@@ -3753,21 +3749,24 @@ void MasterService::RestoreState() {
             }
 
             auto save_result = FileUtil::SaveStringToFile(
-                manifest_content, fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
+                manifest_content, fs::path(snapshot_backup_dir_) /
+                                      SNAPSHOT_BACKUP_RESTORE_DIR /
                                       SNAPSHOT_MANIFEST_FILE);
             if (!save_result) {
                 LOG(ERROR) << "[Restore] Failed to save manifest to file: "
                            << save_result.error();
             }
             save_result = FileUtil::SaveBinaryToFile(
-                metadata_content, fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
+                metadata_content, fs::path(snapshot_backup_dir_) /
+                                      SNAPSHOT_BACKUP_RESTORE_DIR /
                                       SNAPSHOT_METADATA_FILE);
             if (!save_result) {
                 LOG(ERROR) << "[Restore] Failed to save metadata to file: "
                            << save_result.error();
             }
             save_result = FileUtil::SaveBinaryToFile(
-                segments_content, fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
+                segments_content, fs::path(snapshot_backup_dir_) /
+                                      SNAPSHOT_BACKUP_RESTORE_DIR /
                                       SNAPSHOT_SEGMENTS_FILE);
             if (!save_result) {
                 LOG(ERROR) << "[Restore] Failed to save segments to file: "
@@ -3775,9 +3774,9 @@ void MasterService::RestoreState() {
             }
             if (!task_manager_content.empty()) {
                 save_result = FileUtil::SaveBinaryToFile(
-                    task_manager_content,
-                    fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
-                        SNAPSHOT_TASK_MANAGER_FILE);
+                    task_manager_content, fs::path(snapshot_backup_dir_) /
+                                              SNAPSHOT_BACKUP_RESTORE_DIR /
+                                              SNAPSHOT_TASK_MANAGER_FILE);
                 if (!save_result) {
                     LOG(ERROR)
                         << "[Restore] Failed to save task manager to file: "
@@ -4497,9 +4496,9 @@ MasterService::MetadataSerializer::Serialize() {
 
     // 4. Serialize oplog_sequence_id
     // This allows Standby to resume OpLog replay from the correct point after
-    // restore. Note: snapshot_mutex_ in PersistState protects against concurrent
-    // metadata/OpLog updates, ensuring this ID is consistent with the
-    // serialized metadata.
+    // restore. Note: snapshot_mutex_ in PersistState protects against
+    // concurrent metadata/OpLog updates, ensuring this ID is consistent with
+    // the serialized metadata.
     packer.pack("oplog_sequence_id");
     packer.pack(service_->oplog_manager_.GetLastSequenceId());
 

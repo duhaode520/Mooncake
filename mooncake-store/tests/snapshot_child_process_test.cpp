@@ -64,15 +64,16 @@ class SnapshotChildProcessTest : public ::testing::Test {
     // Create a default service with snapshot_restore enabled (backend
     // initialized)
     void CreateDefaultService() {
-        auto config = MasterServiceConfigBuilder()
-                          .set_enable_snapshot(false)
-                          .set_enable_snapshot_restore(true)
-                          .set_snapshot_backup_dir(tmp_dir() + "/backup")
-                          .set_snapshot_interval_seconds(100)
-                          .set_snapshot_child_timeout_seconds(60)
-                          .set_snapshot_retention_count(3)
-                          .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                          .build();
+        auto config =
+            MasterServiceConfigBuilder()
+                .set_enable_snapshot(false)
+                .set_enable_snapshot_restore(true)
+                .set_snapshot_backup_dir(tmp_dir() + "/backup")
+                .set_snapshot_interval_seconds(100)
+                .set_snapshot_child_timeout_seconds(60)
+                .set_snapshot_retention_count(3)
+                .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+                .build();
         service_ = std::make_unique<MasterService>(config);
     }
 
@@ -267,15 +268,16 @@ TEST_F(SnapshotChildProcessTest, UploadSnapshotFile_Success) {
 
 TEST_F(SnapshotChildProcessTest, AutoSnapshot_GeneratesFiles) {
     // Create a service with snapshot enabled and short interval
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(true)
-                      .set_enable_snapshot_restore(false)
-                      .set_snapshot_backup_dir(tmp_dir() + "/backup")
-                      .set_snapshot_interval_seconds(2)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(true)
+            .set_enable_snapshot_restore(false)
+            .set_snapshot_backup_dir(tmp_dir() + "/backup")
+            .set_snapshot_interval_seconds(2)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     auto auto_service = std::make_unique<MasterService>(config);
 
     // Wait long enough for at least one snapshot cycle to complete
@@ -308,15 +310,16 @@ TEST_F(SnapshotChildProcessTest, RestoreWithBackupDir_CreatesBackupFiles) {
 
     // Step 2: Create a new service with restore + backup_dir set
     std::string backup_dir = tmp_dir() + "/backup_restore_test";
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(false)
-                      .set_enable_snapshot_restore(true)
-                      .set_snapshot_backup_dir(backup_dir)
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir(backup_dir)
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     auto restore_service = std::make_unique<MasterService>(config);
 
     // Step 3: Verify backup files were created in
@@ -345,15 +348,16 @@ TEST_F(SnapshotChildProcessTest, RestoreWithoutBackupDir_NoBackupFiles) {
     service_.reset();
 
     // Step 2: Create a new service with restore but NO backup_dir
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(false)
-                      .set_enable_snapshot_restore(true)
-                      .set_snapshot_backup_dir("")  // empty = no backup
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir("")  // empty = no backup
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     auto restore_service = std::make_unique<MasterService>(config);
 
     // Step 3: Verify NO backup directory was created
@@ -379,14 +383,15 @@ TEST_F(SnapshotChildProcessTest, EnableSnapshotWithoutEnvVar_Throws) {
     // Unset env var
     ::unsetenv(kEnvSnapshotLocalPath);
 
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(true)
-                      .set_enable_snapshot_restore(false)
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(true)
+            .set_enable_snapshot_restore(false)
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
 
     // LocalFileBackend default constructor throws when env var is missing
     EXPECT_THROW(MasterService service(config), std::runtime_error);
@@ -396,14 +401,15 @@ TEST_F(SnapshotChildProcessTest, DisableSnapshotWithoutEnvVar_NoThrow) {
     // Unset env var
     ::unsetenv(kEnvSnapshotLocalPath);
 
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(false)
-                      .set_enable_snapshot_restore(false)
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(false)
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
 
     // With snapshot disabled, backend is never created, so no throw
     EXPECT_NO_THROW({ MasterService service(config); });
@@ -413,15 +419,16 @@ TEST_F(SnapshotChildProcessTest, DisableSnapshotWithoutEnvVar_NoThrow) {
 
 TEST_F(SnapshotChildProcessTest, RestoreCleansNonCompleteReplica) {
     // Step 1: Create service and add both clean and dirty data
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(false)
-                      .set_enable_snapshot_restore(true)
-                      .set_snapshot_backup_dir(tmp_dir() + "/backup")
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir(tmp_dir() + "/backup")
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     service_ = std::make_unique<MasterService>(config);
 
     // Mount a segment
@@ -463,15 +470,16 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansNonCompleteReplica) {
     service_.reset();
 
     // Step 3: Restore into a new service
-    auto restore_config = MasterServiceConfigBuilder()
-                              .set_enable_snapshot(false)
-                              .set_enable_snapshot_restore(true)
-                              .set_snapshot_backup_dir(tmp_dir() + "/backup")
-                              .set_snapshot_interval_seconds(100)
-                              .set_snapshot_child_timeout_seconds(60)
-                              .set_snapshot_retention_count(3)
-                              .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                              .build();
+    auto restore_config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir(tmp_dir() + "/backup")
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     auto restored_service = std::make_unique<MasterService>(restore_config);
 
     // Step 4: Verify non-COMPLETE replica was cleaned, complete one remains
@@ -485,16 +493,17 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansNonCompleteReplica) {
 
 TEST_F(SnapshotChildProcessTest, RestoreCleansExpiredLease) {
     // Step 1: Create service with long lease TTL
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(false)
-                      .set_enable_snapshot_restore(true)
-                      .set_snapshot_backup_dir(tmp_dir() + "/backup")
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .set_default_kv_lease_ttl(600000)  // 10 min lease
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir(tmp_dir() + "/backup")
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .set_default_kv_lease_ttl(600000)  // 10 min lease
+            .build();
     service_ = std::make_unique<MasterService>(config);
 
     // Mount a segment
@@ -537,15 +546,16 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansExpiredLease) {
     service_.reset();
 
     // Step 3: Restore into a new service
-    auto restore_config = MasterServiceConfigBuilder()
-                              .set_enable_snapshot(false)
-                              .set_enable_snapshot_restore(true)
-                              .set_snapshot_backup_dir(tmp_dir() + "/backup")
-                              .set_snapshot_interval_seconds(100)
-                              .set_snapshot_child_timeout_seconds(60)
-                              .set_snapshot_retention_count(3)
-                              .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                              .build();
+    auto restore_config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir(tmp_dir() + "/backup")
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     auto restored_service = std::make_unique<MasterService>(restore_config);
 
     // Step 4: Verify normal data retained, expired-lease data cleaned
@@ -630,15 +640,16 @@ TEST_F(SnapshotChildProcessTest, PersistState_FailFast_StopsOnFirstError) {
 TEST_F(SnapshotChildProcessTest, UploadFail_WithBackupDir_SavesAllFiles) {
     // Create service WITH backup_dir to test non-fail-fast behavior
     std::string backup_dir = tmp_dir() + "/backup_upload_fail";
-    auto config = MasterServiceConfigBuilder()
-                      .set_enable_snapshot(false)
-                      .set_enable_snapshot_restore(true)
-                      .set_snapshot_backup_dir(backup_dir)
-                      .set_snapshot_interval_seconds(100)
-                      .set_snapshot_child_timeout_seconds(60)
-                      .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-                      .build();
+    auto config =
+        MasterServiceConfigBuilder()
+            .set_enable_snapshot(false)
+            .set_enable_snapshot_restore(true)
+            .set_snapshot_backup_dir(backup_dir)
+            .set_snapshot_interval_seconds(100)
+            .set_snapshot_child_timeout_seconds(60)
+            .set_snapshot_retention_count(3)
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
+            .build();
     service_ = std::make_unique<MasterService>(config);
 
     // Mount a segment to have some data to serialize

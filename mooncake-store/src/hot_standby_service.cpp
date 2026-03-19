@@ -157,7 +157,8 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     // back to OpLog-only bootstrap.
 #ifdef STORE_USE_ETCD
     if (config_.enable_snapshot_bootstrap && !snapshot_provider_) {
-        static constexpr const char* kDefaultSnapshotRoot = "mooncake_master_snapshot";
+        static constexpr const char* kDefaultSnapshotRoot =
+            "mooncake_master_snapshot";
         snapshot_provider_ = std::make_unique<EtcdSnapshotProvider>(
             etcd_endpoints_, /*snapshot_root=*/kDefaultSnapshotRoot);
         LOG(INFO) << "Snapshot bootstrap enabled: created default "

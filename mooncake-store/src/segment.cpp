@@ -390,7 +390,6 @@ ErrorCode SegmentView::GetMountedSegment(const UUID& segment_id,
         return ErrorCode::SEGMENT_NOT_FOUND;
     }
 
-
     // Return the found segment
     mountedSegment = it->second;
     return ErrorCode::OK;

@@ -42,9 +42,7 @@ class OpLogApplier {
      * @brief Set or replace the OpLogStore used for requesting missing entries
      * @param oplog_store OpLogStore pointer (caller owns the pointer)
      */
-    void SetOpLogStore(OpLogStore* oplog_store) {
-        oplog_store_ = oplog_store;
-    }
+    void SetOpLogStore(OpLogStore* oplog_store) { oplog_store_ = oplog_store; }
 
     /**
      * @brief Apply a single OpLog entry (with ordering checks)

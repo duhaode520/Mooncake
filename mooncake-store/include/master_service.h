@@ -1250,7 +1250,8 @@ class MasterService {
     uint64_t snapshot_child_timeout_seconds_ =
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     uint32_t snapshot_retention_count_ = DEFAULT_SNAPSHOT_RETENTION_COUNT;
-    SnapshotBackendType snapshot_backend_type_ = SnapshotBackendType::LOCAL_FILE;
+    SnapshotBackendType snapshot_backend_type_ =
+        SnapshotBackendType::LOCAL_FILE;
     std::unique_ptr<SerializerBackend> snapshot_backend_;
     std::string etcd_endpoints_;
     mutable std::shared_mutex snapshot_mutex_;
