@@ -3,10 +3,13 @@
 #include <cassert>
 #include <cstdint>
 #include <shared_mutex>
+#include <sstream>
 #include <regex>
 #include <unordered_set>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <fcntl.h>
 #include <ylt/util/tl/expected.hpp>
 #include <boost/algorithm/string.hpp>
@@ -24,6 +27,7 @@
 #include "utils/zstd_util.h"
 #include "utils/file_util.h"
 #include "utils/snapshot_logger.h"
+#include "utils/crc32c_util.h"
 #include "utils.h"
 
 namespace mooncake {
@@ -40,6 +44,40 @@ static const std::string SNAPSHOT_BACKUP_RESTORE_DIR =
     "mooncake_snapshot_restore_backup";
 static const std::string SNAPSHOT_SERIALIZER_VERSION = "1.0.0";
 static const std::string SNAPSHOT_SERIALIZER_TYPE = "messagepack";
+static const std::string SNAPSHOT_INDEX_FILE = "index.txt";
+
+// Helper: trim leading/trailing whitespace
+static std::string TrimWhitespace(const std::string& s) {
+    auto start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    auto end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
+}
+
+// Helper: parse snapshot index content (one snapshot ID per line, newest first)
+static std::vector<std::string> ParseSnapshotIndexContent(
+    const std::string& content) {
+    std::vector<std::string> ids;
+    std::istringstream iss(content);
+    std::string line;
+    while (std::getline(iss, line)) {
+        std::string trimmed = TrimWhitespace(line);
+        if (!trimmed.empty()) {
+            ids.push_back(trimmed);
+        }
+    }
+    return ids;
+}
+
+// Helper: build snapshot index content from ID list
+static std::string BuildSnapshotIndexContent(
+    const std::vector<std::string>& ids) {
+    std::string result;
+    for (const auto& id : ids) {
+        result += id + "\n";
+    }
+    return result;
+}
 
 namespace {
 
@@ -181,6 +219,8 @@ MasterService::MasterService(const MasterServiceConfig& config)
       allocation_strategy_(
           CreateAllocationStrategy(config.allocation_strategy_type)),
       enable_snapshot_restore_(config.enable_snapshot_restore),
+      enable_snapshot_restore_clean_metadata_(
+          config.enable_snapshot_restore_clean_metadata),
       enable_snapshot_(config.enable_snapshot),
       snapshot_backup_dir_(config.snapshot_backup_dir),
       snapshot_interval_seconds_(config.snapshot_interval_seconds),
@@ -195,9 +235,8 @@ MasterService::MasterService(const MasterServiceConfig& config)
       enable_cxl_(config.enable_cxl) {
     if (enable_snapshot_ || enable_snapshot_restore_) {
         try {
-            auto backend_type =
-                ParseSnapshotBackendType(config.snapshot_backend_type);
-            snapshot_backend_ = SerializerBackend::Create(backend_type, config.etcd_endpoints);
+            snapshot_backend_type_ = config.snapshot_backend_type;
+            snapshot_backend_ = SerializerBackend::Create(snapshot_backend_type_, config.etcd_endpoints);
         } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to create snapshot backend: " << e.what();
             throw std::runtime_error(
@@ -3318,78 +3357,20 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshotFile(
 
 void MasterService::CleanupOldSnapshot(int keep_count,
                                        const std::string& snapshot_id) {
-    // 1. List all state directories
-    std::string prefix = SNAPSHOT_ROOT + "/";
-    std::vector<std::string> all_objects;
-    auto list_result =
-        snapshot_backend_->ListObjectsWithPrefix(prefix, all_objects);
-    if (!list_result) {
-        SNAP_LOG_ERROR(
-            "[Snapshot] error=list failed, prefix={}, snapshot_id={}", prefix,
+    // 1. Read existing index to get snapshot list
+    std::string index_path = SNAPSHOT_ROOT + "/" + SNAPSHOT_INDEX_FILE;
+    std::string index_content;
+    std::vector<std::string> existing_ids;
+    if (snapshot_backend_->DownloadString(index_path, index_content)) {
+        existing_ids = ParseSnapshotIndexContent(index_content);
+        SNAP_LOG_INFO(
+            "[Snapshot] Loaded snapshot index, count={}, snapshot_id={}",
+            existing_ids.size(), snapshot_id);
+    } else {
+        SNAP_LOG_INFO(
+            "[Snapshot] index not found, creating new index, "
+            "snapshot_id={}",
             snapshot_id);
-        return;
-    }
-
-    // 2. Extract all timestamp directories (by finding directory structure)
-    std::set<std::string> snapshot_dirs;
-    std::regex state_dir_regex(
-        "^" + prefix + R"((\d{8}_\d{6}_\d{3})/)");  // Match directory structure
-
-    // Extract directory names by finding paths of all objects
-    for (const auto& object_key : all_objects) {
-        std::smatch match;
-        if (std::regex_search(object_key, match, state_dir_regex)) {
-            snapshot_dirs.insert(match[1].str());  // Extract timestamp part
-        }
-    }
-
-    // 3. Convert to vector and sort by timestamp (descending, newest first)
-    std::vector<std::string> sorted_snapshot_dirs(snapshot_dirs.begin(),
-                                                  snapshot_dirs.end());
-    std::sort(sorted_snapshot_dirs.begin(), sorted_snapshot_dirs.end(),
-              std::greater<>());
-
-    // 4. Delete old states exceeding retention count
-    if (static_cast<int>(sorted_snapshot_dirs.size()) > keep_count) {
-        for (int i = keep_count;
-             i < static_cast<int>(sorted_snapshot_dirs.size()); i++) {
-            std::string old_state_dir = sorted_snapshot_dirs[i];
-
-            // Fault tolerance: skip if same as current snapshot_id to avoid
-            // accidental deletion
-            if (old_state_dir == snapshot_id) {
-                SNAP_LOG_WARN(
-                    "[Snapshot] Skipping deletion of current snapshot "
-                    "directory {}, "
-                    "snapshot_id={}",
-                    old_state_dir, snapshot_id);
-                continue;
-            }
-
-            std::string old_state_prefix = prefix + old_state_dir + "/";
-
-            // Delete the entire old state directory (regardless of
-            // manifest.json existence)
-            auto delete_result =
-                snapshot_backend_->DeleteObjectsWithPrefix(old_state_prefix);
-            if (!delete_result) {
-                SNAP_LOG_ERROR(
-                    "[Snapshot] Failed to delete old state directory {}, "
-                    "snapshot_id={}",
-                    old_state_dir, snapshot_id);
-            } else {
-                SNAP_LOG_INFO(
-                    "[Snapshot] Successfully deleted old state directory {}, "
-                    "snapshot_id={}",
-                    old_state_dir, snapshot_id);
-            }
-=======
-        } else {
-            SNAP_LOG_INFO(
-                "[Snapshot] index not found, creating new index, "
-                "snapshot_id={}",
-                snapshot_id);
-        }
     }
 
     std::vector<std::string> new_ids;
@@ -5046,6 +5027,9 @@ MasterService::MetadataSerializer::DeserializeDiscardedReplicas(
         std::lock_guard lock(service_->discarded_replicas_mutex_);
         service_->discarded_replicas_ = std::move(temp_list);
     }
+
+    return {};
+}
 
 // ============================================================================
 // Snapshot Daemon Implementation (ETCD Storage)

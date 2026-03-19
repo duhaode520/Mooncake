@@ -110,6 +110,8 @@ DEFINE_string(snapshot_backup_dir, "",
               "Optional local directory for snapshot and restore backup. "
               "If empty, local backup is disabled");
 DEFINE_bool(enable_snapshot_restore, false, "enable restore from snapshot");
+DEFINE_bool(enable_snapshot_restore_clean_metadata, true,
+            "Enable cleanup of non-ready metadata after snapshot restore");
 DEFINE_bool(enable_snapshot, false, "Enable periodic snapshot of master data");
 DEFINE_uint64(snapshot_interval_seconds,
               mooncake::DEFAULT_SNAPSHOT_INTERVAL_SEC,
@@ -123,7 +125,6 @@ DEFINE_uint32(snapshot_retention_count,
               "automatically deleted)");
 DEFINE_string(snapshot_backend_type, "",
               "Snapshot storage backend type: 'local' for local filesystem, "
-              "'s3' for S3 storage");
               "'s3' for S3 storage, 'etcd' for ETCD storage");
 DEFINE_string(oplog_store_type, "etcd",
               "OpLog persistent storage backend type: 'etcd' or 'localfs'");
@@ -728,7 +729,7 @@ int main(int argc, char* argv[]) {
         << ", max_retry_attempts=" << master_config.max_retry_attempts
         << ", enable_cxl=" << master_config.enable_cxl
         << ", cxl_path=" << master_config.cxl_path
-        << ", cxl_size=" << master_config.cxl_size;
+        << ", cxl_size=" << master_config.cxl_size
         << ", snapshot_backend=" << master_config.snapshot_backend_type
         << ", oplog_store_type=" << master_config.oplog_store_type
         << ", oplog_store_root_dir=" << master_config.oplog_store_root_dir

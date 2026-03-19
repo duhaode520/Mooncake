@@ -2,6 +2,7 @@
 
 #include "master_service.h"
 #include "master_metric_manager.h"
+#include "etcd_helper.h"
 #include "segment.h"
 #include "serialize/serializer_backend.h"
 #include "task_manager.h"
@@ -650,9 +651,6 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
 
     // ==================== File Operation Methods ====================
 
-    // Copy msgpack snapshot files to backup directory
-    void CopySnapshotToBackup(const std::string& snapshot_id,
-                              const std::string& backup_id) const {
     // Copy msgpack snapshot files to backup directory (or map backup id for
     // etcd)
     void CopySnapshotToBackup(const std::string& snapshot_id,
@@ -727,7 +725,6 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
         return is_equal;
     }
 
-    // Compare all msgpack files in two snapshot directories
     // Compare all msgpack files in two snapshot directories or etcd key
     // prefixes
     bool CompareSnapshotDirectories(const std::string& dir1,
@@ -742,16 +739,6 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
         bool all_match = true;
         int file_count = 0;
 
-        for (const auto& filename : files_to_compare) {
-            std::string file1 = dir1 + filename;
-            std::string file2 = dir2 + filename;
-
-            LOG(INFO) << "Comparing file: " << filename;
-
-            if (!CompareBinaryFiles(file1, file2)) {
-                LOG(ERROR) << "Mismatch found in file: " << filename;
-                all_match = false;
-                break;
         if (UseEtcdSnapshotBackend()) {
             if (!EnsureEtcdConnected()) {
                 return false;
@@ -801,7 +788,6 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
                 }
                 file_count++;
             }
-            file_count++;
         }
 
         LOG(INFO) << "Compared " << file_count
@@ -831,7 +817,7 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
             MasterServiceConfig::builder()
                 .set_memory_allocator(BufferAllocatorType::OFFSET)
                 .set_enable_snapshot_restore(true)
-                .set_snapshot_backend_type("local")
+                .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                 .set_root_fs_dir(service->root_fs_dir_)
                 .build();
         std::unique_ptr<MasterService> restored_service(
@@ -917,6 +903,7 @@ class MasterServiceSnapshotTestBase : public ::testing::Test {
 
    private:
     std::string tmp_dir_;
+    mutable std::unordered_map<std::string, std::string> etcd_backup_id_map_;
 };
 
 }  // namespace mooncake::test

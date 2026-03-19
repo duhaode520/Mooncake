@@ -31,6 +31,7 @@ set(MOONCAKE_STORE_SOURCES
     serialize/serializer_backend.cpp
     utils/type_util.cpp
     utils/file_util.cpp
+    utils/crc32c_util.cpp
     task_manager.cpp
     local_hot_cache.cpp
     oplog_manager.cpp
@@ -231,4 +232,19 @@ if (STORE_USE_ETCD)
     target_link_libraries(mock_client PRIVATE ${ETCD_WRAPPER_LIB})
 endif()
 
-install(TARGETS mooncake_master mooncake_client mock_client snapshot_uploader_daemon DESTINATION bin)
+# Snapshot uploader daemon binary
+if (STORE_USE_ETCD)
+    add_executable(snapshot_uploader_daemon snapshot_uploader_daemon.cpp)
+    target_link_libraries(snapshot_uploader_daemon PRIVATE
+        glog::glog
+        gflags::gflags
+        ${ETCD_WRAPPER_LIB}
+        pthread
+    )
+    add_dependencies(snapshot_uploader_daemon build_etcd_wrapper)
+    target_compile_options(snapshot_uploader_daemon PRIVATE -Os)
+    target_link_options(snapshot_uploader_daemon PRIVATE -Os -s)
+    install(TARGETS mooncake_master mooncake_client mock_client snapshot_uploader_daemon DESTINATION bin)
+else()
+    install(TARGETS mooncake_master mooncake_client mock_client DESTINATION bin)
+endif()

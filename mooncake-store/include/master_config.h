@@ -591,6 +591,12 @@ class MasterServiceConfigBuilder {
         return *this;
     }
 
+    MasterServiceConfigBuilder& set_enable_snapshot_restore_clean_metadata(
+        bool enable) {
+        enable_snapshot_restore_clean_metadata_ = enable;
+        return *this;
+    }
+
     MasterServiceConfigBuilder& set_enable_snapshot(bool enable) {
         enable_snapshot_ = enable;
         return *this;
@@ -675,6 +681,9 @@ class MasterServiceConfigBuilder {
 
     MasterServiceConfigBuilder& set_enable_cxl(bool enable) {
         enable_cxl_ = enable;
+        return *this;
+    }
+
     MasterServiceConfigBuilder& set_oplog_store_type(OpLogStoreType type) {
         oplog_store_type_ = type;
         return *this;

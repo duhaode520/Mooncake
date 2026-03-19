@@ -71,7 +71,7 @@ class SnapshotChildProcessTest : public ::testing::Test {
                           .set_snapshot_interval_seconds(100)
                           .set_snapshot_child_timeout_seconds(60)
                           .set_snapshot_retention_count(3)
-                          .set_snapshot_backend_type("local")
+                          .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                           .build();
         service_ = std::make_unique<MasterService>(config);
     }
@@ -274,7 +274,7 @@ TEST_F(SnapshotChildProcessTest, AutoSnapshot_GeneratesFiles) {
                       .set_snapshot_interval_seconds(2)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
     auto auto_service = std::make_unique<MasterService>(config);
 
@@ -315,7 +315,7 @@ TEST_F(SnapshotChildProcessTest, RestoreWithBackupDir_CreatesBackupFiles) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
     auto restore_service = std::make_unique<MasterService>(config);
 
@@ -352,7 +352,7 @@ TEST_F(SnapshotChildProcessTest, RestoreWithoutBackupDir_NoBackupFiles) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
     auto restore_service = std::make_unique<MasterService>(config);
 
@@ -385,7 +385,7 @@ TEST_F(SnapshotChildProcessTest, EnableSnapshotWithoutEnvVar_Throws) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
 
     // LocalFileBackend default constructor throws when env var is missing
@@ -402,7 +402,7 @@ TEST_F(SnapshotChildProcessTest, DisableSnapshotWithoutEnvVar_NoThrow) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
 
     // With snapshot disabled, backend is never created, so no throw
@@ -420,7 +420,7 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansNonCompleteReplica) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
     service_ = std::make_unique<MasterService>(config);
 
@@ -470,7 +470,7 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansNonCompleteReplica) {
                               .set_snapshot_interval_seconds(100)
                               .set_snapshot_child_timeout_seconds(60)
                               .set_snapshot_retention_count(3)
-                              .set_snapshot_backend_type("local")
+                              .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                               .build();
     auto restored_service = std::make_unique<MasterService>(restore_config);
 
@@ -492,7 +492,7 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansExpiredLease) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .set_default_kv_lease_ttl(600000)  // 10 min lease
                       .build();
     service_ = std::make_unique<MasterService>(config);
@@ -544,7 +544,7 @@ TEST_F(SnapshotChildProcessTest, RestoreCleansExpiredLease) {
                               .set_snapshot_interval_seconds(100)
                               .set_snapshot_child_timeout_seconds(60)
                               .set_snapshot_retention_count(3)
-                              .set_snapshot_backend_type("local")
+                              .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                               .build();
     auto restored_service = std::make_unique<MasterService>(restore_config);
 
@@ -569,7 +569,7 @@ TEST_F(SnapshotChildProcessTest, PersistState_FailFast_StopsOnFirstError) {
             .set_snapshot_interval_seconds(100)
             .set_snapshot_child_timeout_seconds(60)
             .set_snapshot_retention_count(3)
-            .set_snapshot_backend_type("local")
+            .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
             .build();
     service_ = std::make_unique<MasterService>(config);
 
@@ -637,7 +637,7 @@ TEST_F(SnapshotChildProcessTest, UploadFail_WithBackupDir_SavesAllFiles) {
                       .set_snapshot_interval_seconds(100)
                       .set_snapshot_child_timeout_seconds(60)
                       .set_snapshot_retention_count(3)
-                      .set_snapshot_backend_type("local")
+                      .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
                       .build();
     service_ = std::make_unique<MasterService>(config);
 
