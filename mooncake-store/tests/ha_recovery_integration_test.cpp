@@ -354,7 +354,7 @@ class HaRecoveryIntegrationTest
         auto cfg = MasterServiceConfig::builder()
                        .set_enable_ha(false)
                        .set_memory_allocator(BufferAllocatorType::OFFSET)
-                       .set_enable_snapshot(false)
+                       .set_enable_snapshot(true)
                        .set_enable_snapshot_restore(false)
                        .set_snapshot_backend_type(backend_type)
                        .set_etcd_endpoints(etcd_ep)

@@ -430,6 +430,7 @@ void MasterService::RestoreFromStandbySnapshot(
 
     const auto now = std::chrono::system_clock::now();
     size_t restored = 0;
+    int64_t total_restored_mem_size = 0;
     for (const auto& kv : snapshot) {
         const std::string& key = kv.first;
         const StandbyObjectMetadata& sm = kv.second;
@@ -441,6 +442,11 @@ void MasterService::RestoreFromStandbySnapshot(
                 const auto& bd = rd.get_memory_descriptor().buffer_descriptor;
                 replicas.emplace_back(ReplicaFromDescriptor(
                     rd, get_keepalive_allocator(bd.transport_endpoint_)));
+
+                int64_t buf_size = static_cast<int64_t>(bd.size_);
+                MasterMetricManager::instance().inc_allocated_mem_size(
+                    /*segment=*/std::string(), buf_size);
+                total_restored_mem_size += buf_size;
             } else {
                 replicas.emplace_back(ReplicaFromDescriptor(rd, nullptr));
             }
@@ -477,6 +483,7 @@ void MasterService::RestoreFromStandbySnapshot(
 
     LOG(INFO) << "Restored metadata from standby snapshot: restored_keys="
               << restored
+              << ", restored_mem_size=" << total_restored_mem_size
               << ", initial_oplog_sequence_id=" << initial_oplog_sequence_id;
 }
 
@@ -526,6 +533,7 @@ MasterService::~MasterService() {
 
     // Wake sleepers so join() doesn't block for long sleep intervals.
     task_cleanup_cv_.notify_all();
+    snapshot_thread_cv_.notify_all();
 
     if (eviction_thread_.joinable()) {
         eviction_thread_.join();
@@ -2747,8 +2755,13 @@ uint64_t MasterService::ReleaseExpiredDiscardedReplicas(
 void MasterService::SnapshotThreadFunc() {
     LOG(INFO) << "[Snapshot] snapshot_thread started";
     while (snapshot_running_) {
-        std::this_thread::sleep_for(
-            std::chrono::seconds(snapshot_interval_seconds_));
+        {
+            std::unique_lock<std::mutex> lk(snapshot_thread_mutex_);
+            snapshot_thread_cv_.wait_for(
+                lk, std::chrono::seconds(snapshot_interval_seconds_),
+                [this] { return !snapshot_running_.load(); });
+        }
+        if (!snapshot_running_) break;
         if (!enable_snapshot_) {
             // Snapshot is disabled
             LOG(INFO)
