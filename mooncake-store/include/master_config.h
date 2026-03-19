@@ -189,7 +189,6 @@ class MasterServiceSupervisorConfig {
         snapshot_retention_count = config.snapshot_retention_count;
         snapshot_backend_type =
             ParseSnapshotBackendType(config.snapshot_backend_type);
-        etcd_endpoints = config.etcd_endpoints;
         max_total_finished_tasks = config.max_total_finished_tasks;
         max_total_pending_tasks = config.max_total_pending_tasks;
         max_total_processing_tasks = config.max_total_processing_tasks;

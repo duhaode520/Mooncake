@@ -3302,7 +3302,7 @@ tl::expected<void, SerializationError> MasterService::PersistState(
                           snapshot_id);
         }
 
-        CleanupOldSnapshot(10, snapshot_id);
+        CleanupOldSnapshot(snapshot_retention_count_, snapshot_id);
         SNAP_LOG_INFO("[Snapshot] action=persisting_state end, snapshot_id={}",
                       snapshot_id);
     } catch (const std::exception& e) {
@@ -3422,6 +3422,8 @@ void MasterService::CleanupOldSnapshot(int keep_count,
         std::string base_prefix = SNAPSHOT_ROOT + "/" + old_id + "/";
         std::string metadata_path = base_prefix + SNAPSHOT_METADATA_FILE;
         std::string segments_path = base_prefix + SNAPSHOT_SEGMENTS_FILE;
+        std::string task_manager_path =
+            base_prefix + SNAPSHOT_TASK_MANAGER_FILE;
         std::string manifest_path = base_prefix + SNAPSHOT_MANIFEST_FILE;
 
         auto delete_result =
@@ -3436,6 +3438,13 @@ void MasterService::CleanupOldSnapshot(int keep_count,
         if (!delete_result) {
             SNAP_LOG_ERROR("[Snapshot] Failed to delete {}, snapshot_id={}",
                            segments_path, snapshot_id);
+        }
+
+        delete_result =
+            snapshot_backend_->DeleteObjectsWithPrefix(task_manager_path);
+        if (!delete_result) {
+            SNAP_LOG_ERROR("[Snapshot] Failed to delete {}, snapshot_id={}",
+                           task_manager_path, snapshot_id);
         }
 
         delete_result =
@@ -3627,21 +3636,21 @@ void MasterService::RestoreState() {
             }
 
             auto save_result = FileUtil::SaveStringToFile(
-                manifest_content, fs::path(snapshot_backup_dir_) / "restore" /
+                manifest_content, fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
                                       SNAPSHOT_MANIFEST_FILE);
             if (!save_result) {
                 LOG(ERROR) << "[Restore] Failed to save manifest to file: "
                            << save_result.error();
             }
             save_result = FileUtil::SaveBinaryToFile(
-                metadata_content, fs::path(snapshot_backup_dir_) / "restore" /
+                metadata_content, fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
                                       SNAPSHOT_METADATA_FILE);
             if (!save_result) {
                 LOG(ERROR) << "[Restore] Failed to save metadata to file: "
                            << save_result.error();
             }
             save_result = FileUtil::SaveBinaryToFile(
-                segments_content, fs::path(snapshot_backup_dir_) / "restore" /
+                segments_content, fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
                                       SNAPSHOT_SEGMENTS_FILE);
             if (!save_result) {
                 LOG(ERROR) << "[Restore] Failed to save segments to file: "
@@ -3650,7 +3659,7 @@ void MasterService::RestoreState() {
             if (!task_manager_content.empty()) {
                 save_result = FileUtil::SaveBinaryToFile(
                     task_manager_content,
-                    fs::path(snapshot_backup_dir_) / "restore" /
+                    fs::path(snapshot_backup_dir_) / SNAPSHOT_BACKUP_RESTORE_DIR /
                         SNAPSHOT_TASK_MANAGER_FILE);
                 if (!save_result) {
                     LOG(ERROR)
