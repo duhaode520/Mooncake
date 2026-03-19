@@ -5,6 +5,7 @@
 #include <glog/logging.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -54,9 +55,16 @@ class MasterViewHelper {
      * @param master_address: The ip:port address of the master to be elected.
      * @param version: Output param, the version of the new master view.
      * @param lease_id: Output param, the lease id of the leader.
+     * @param on_leader_discovered: Optional callback invoked each time an
+     *        existing leader is discovered during the election loop. This
+     *        allows the caller to start services (e.g. Standby) while
+     *        waiting. The callback receives the current leader address.
      */
+    using LeaderDiscoveredCallback =
+        std::function<void(const std::string& leader_addr)>;
     void ElectLeader(const std::string& master_address, ViewVersionId& version,
-                     EtcdLeaseId& lease_id);
+                     EtcdLeaseId& lease_id,
+                     LeaderDiscoveredCallback on_leader_discovered = nullptr);
 
     /*
      * @brief Keep the master to be the leader. This function blocks until the

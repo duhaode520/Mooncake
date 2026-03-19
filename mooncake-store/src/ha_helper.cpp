@@ -77,7 +77,8 @@ ErrorCode MasterViewHelper::ConnectToEtcd(const std::string& etcd_endpoints) {
 
 void MasterViewHelper::ElectLeader(const std::string& master_address,
                                    ViewVersionId& version,
-                                   EtcdLeaseId& lease_id) {
+                                   EtcdLeaseId& lease_id,
+                                   LeaderDiscoveredCallback on_leader_discovered) {
     while (true) {
         // Check if there is already a leader
         ViewVersionId current_version = 0;
@@ -92,6 +93,11 @@ void MasterViewHelper::ElectLeader(const std::string& master_address,
         } else if (ret != ErrorCode::ETCD_KEY_NOT_EXIST) {
             LOG(INFO) << "CurrentLeader=" << current_master
                       << ", CurrentVersion=" << current_version;
+            // Notify the caller so it can start services (e.g. Standby)
+            // while we wait for the leader to disappear.
+            if (on_leader_discovered) {
+                on_leader_discovered(current_master);
+            }
             // In rare cases, the leader may be ourselves, but it does not
             // matter. We will watch the key until it's deleted.
             LOG(INFO) << "Waiting for leadership change...";
@@ -232,8 +238,22 @@ int MasterServiceSupervisor::Start() {
                          "leader...";
         }
 
-        // Try to elect self as leader
-        mv_helper.ElectLeader(config_.local_hostname, view_version, lease_id);
+        // Try to elect self as leader.
+        // Pass a callback so that if ElectLeader discovers another leader
+        // inside its retry loop (race: we missed the leader above but it
+        // appeared before our CAS), Standby will be started on-the-fly.
+        mv_helper.ElectLeader(
+            config_.local_hostname, view_version, lease_id,
+            [this, &mv_helper, &had_standby](
+                const std::string& leader_addr) {
+                LOG(INFO)
+                    << "ElectLeader discovered leader: " << leader_addr
+                    << ", ensuring Standby is running...";
+                if (!standby_running_.load()) {
+                    StartStandbyService(mv_helper, leader_addr);
+                    had_standby = true;
+                }
+            });
 
         // If we were running as Standby, finalize catch-up and snapshot
         // metadata now.
