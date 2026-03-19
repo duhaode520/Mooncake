@@ -3332,33 +3332,55 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
             }
         } else {
             // Individual uploads for LOCAL/S3 backends (non-atomic fallback)
-            // Upload core snapshot files first
+            // When backup_dir is configured, try all uploads (continue-all)
+            // to save as much data as possible for manual recovery.
+            // Without backup_dir, fail-fast on first error.
+            std::string all_errors;
+
             auto upload_result =
                 UploadSnapshotFile(snapshot_data.metadata, metadata_path,
                                    SNAPSHOT_METADATA_FILE, snapshot_id);
             if (!upload_result) {
-                return tl::make_unexpected(upload_result.error());
+                if (!use_snapshot_backup_dir_) {
+                    return tl::make_unexpected(upload_result.error());
+                }
+                all_errors += upload_result.error().message;
             }
 
             upload_result =
                 UploadSnapshotFile(snapshot_data.segments, segment_path,
                                    SNAPSHOT_SEGMENTS_FILE, snapshot_id);
             if (!upload_result) {
-                return tl::make_unexpected(upload_result.error());
+                if (!use_snapshot_backup_dir_) {
+                    return tl::make_unexpected(upload_result.error());
+                }
+                all_errors += upload_result.error().message;
             }
 
             upload_result = UploadSnapshotFile(
                 snapshot_data.task_manager, task_manager_path,
                 SNAPSHOT_TASK_MANAGER_FILE, snapshot_id);
             if (!upload_result) {
-                return tl::make_unexpected(upload_result.error());
+                if (!use_snapshot_backup_dir_) {
+                    return tl::make_unexpected(upload_result.error());
+                }
+                all_errors += upload_result.error().message;
             }
 
             upload_result =
                 UploadSnapshotFile(manifest_bytes, manifest_path,
                                    SNAPSHOT_MANIFEST_FILE, snapshot_id);
             if (!upload_result) {
-                return tl::make_unexpected(upload_result.error());
+                if (!use_snapshot_backup_dir_) {
+                    return tl::make_unexpected(upload_result.error());
+                }
+                all_errors += upload_result.error().message;
+            }
+
+            // If any upload failed in continue-all mode, return combined error
+            if (!all_errors.empty()) {
+                return tl::make_unexpected(SerializationError(
+                    ErrorCode::PERSISTENT_FAIL, all_errors));
             }
 
             // Update latest marker last (only if core files succeeded)
@@ -3533,39 +3555,18 @@ void MasterService::CleanupOldSnapshot(int keep_count,
         if (old_id == snapshot_id) {
             continue;
         }
-        std::string base_prefix = SNAPSHOT_ROOT + "/" + old_id + "/";
-        std::string metadata_path = base_prefix + SNAPSHOT_METADATA_FILE;
-        std::string segments_path = base_prefix + SNAPSHOT_SEGMENTS_FILE;
-        std::string task_manager_path =
-            base_prefix + SNAPSHOT_TASK_MANAGER_FILE;
-        std::string manifest_path = base_prefix + SNAPSHOT_MANIFEST_FILE;
-
+        // Delete entire snapshot directory at once.  This works for all
+        // backends: S3 and etcd treat the prefix as a key-prefix and
+        // delete all matching objects/keys; LocalFileBackend treats it as
+        // a directory path and calls remove_all.
+        std::string dir_prefix = SNAPSHOT_ROOT + "/" + old_id + "/";
         auto delete_result =
-            snapshot_backend_->DeleteObjectsWithPrefix(metadata_path);
+            snapshot_backend_->DeleteObjectsWithPrefix(dir_prefix);
         if (!delete_result) {
-            SNAP_LOG_ERROR("[Snapshot] Failed to delete {}, snapshot_id={}",
-                           metadata_path, snapshot_id);
-        }
-
-        delete_result =
-            snapshot_backend_->DeleteObjectsWithPrefix(segments_path);
-        if (!delete_result) {
-            SNAP_LOG_ERROR("[Snapshot] Failed to delete {}, snapshot_id={}",
-                           segments_path, snapshot_id);
-        }
-
-        delete_result =
-            snapshot_backend_->DeleteObjectsWithPrefix(task_manager_path);
-        if (!delete_result) {
-            SNAP_LOG_ERROR("[Snapshot] Failed to delete {}, snapshot_id={}",
-                           task_manager_path, snapshot_id);
-        }
-
-        delete_result =
-            snapshot_backend_->DeleteObjectsWithPrefix(manifest_path);
-        if (!delete_result) {
-            SNAP_LOG_ERROR("[Snapshot] Failed to delete {}, snapshot_id={}",
-                           manifest_path, snapshot_id);
+            SNAP_LOG_ERROR(
+                "[Snapshot] Failed to delete snapshot dir {}, "
+                "snapshot_id={}",
+                dir_prefix, snapshot_id);
         }
     }
 }

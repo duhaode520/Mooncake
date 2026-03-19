@@ -231,6 +231,15 @@ TEST_F(SnapshotChildProcessTest, CleanupOldSnapshot_KeepsRecentDeletesOld) {
         backend->UploadString(manifest_key, "messagepack|1.0.0|" + id);
     }
 
+    // Write index file so CleanupOldSnapshot can discover all snapshots.
+    // Index is ordered newest-first (matching CleanupOldSnapshot convention).
+    std::string index_content;
+    for (auto it = snapshot_ids.rbegin(); it != snapshot_ids.rend(); ++it) {
+        index_content += *it + "\n";
+    }
+    backend->UploadString("mooncake_master_snapshot/index.txt",
+                          index_content);
+
     // Keep only 2, cleanup with current snapshot_id = last one
     CallCleanupOldSnapshot(2, "20240105_000000_000");
 
@@ -240,6 +249,8 @@ TEST_F(SnapshotChildProcessTest, CleanupOldSnapshot_KeepsRecentDeletesOld) {
 
     // Only the 2 newest (20240104, 20240105) should remain
     for (const auto& key : remaining) {
+        // Skip the index file itself
+        if (key.find("index.txt") != std::string::npos) continue;
         EXPECT_TRUE(key.find("20240104_000000_000") != std::string::npos ||
                     key.find("20240105_000000_000") != std::string::npos)
             << "Unexpected remaining key: " << key;
