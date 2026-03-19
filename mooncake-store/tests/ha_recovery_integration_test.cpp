@@ -166,7 +166,7 @@ class HaRecoveryIntegrationTest
                                     std::to_string(getpid()) + "_" +
                                     std::to_string(snap_counter.fetch_add(1));
             std::filesystem::create_directories(localfs_snapshot_dir_);
-            setenv("SNAPSHOT_LOCAL_PATH", localfs_snapshot_dir_.c_str(), 1);
+            setenv("MOONCAKE_SNAPSHOT_LOCAL_PATH", localfs_snapshot_dir_.c_str(), 1);
             auto backend_type =
                 ParseSnapshotBackendType(config.snapshot_backend);
             snapshot_write_backend_ =
@@ -209,7 +209,7 @@ class HaRecoveryIntegrationTest
                 LOG(WARNING) << "Failed to remove snapshot dir "
                              << localfs_snapshot_dir_ << ": " << ec.message();
             }
-            unsetenv("SNAPSHOT_LOCAL_PATH");
+            unsetenv("MOONCAKE_SNAPSHOT_LOCAL_PATH");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         test_lock_.reset();
