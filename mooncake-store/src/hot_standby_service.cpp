@@ -157,7 +157,7 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
     // back to OpLog-only bootstrap.
 #ifdef STORE_USE_ETCD
     if (config_.enable_snapshot_bootstrap && !snapshot_provider_) {
-        static constexpr const char* kDefaultSnapshotRoot = "master_snapshot";
+        static constexpr const char* kDefaultSnapshotRoot = "mooncake_master_snapshot";
         snapshot_provider_ = std::make_unique<EtcdSnapshotProvider>(
             etcd_endpoints_, /*snapshot_root=*/kDefaultSnapshotRoot);
         LOG(INFO) << "Snapshot bootstrap enabled: created default "
@@ -224,6 +224,8 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
         config_.oplog_store_type, cluster_id, OpLogStoreRole::READER,
         config_.oplog_store_root_dir, config_.oplog_poll_interval_ms);
     if (watcher_oplog_store_) {
+        // Wire OpLogStore into OpLogApplier so gap resolution works
+        oplog_applier_->SetOpLogStore(watcher_oplog_store_.get());
         oplog_change_notifier_ =
             watcher_oplog_store_->CreateChangeNotifier(cluster_id);
     }

@@ -160,7 +160,7 @@ class HaRecoveryIntegrationTest
             mock_snapshot_ = std::make_shared<MockSnapshotProvider>();
         } else if (config.snapshot_backend == "local") {
             // LOCAL_FILE snapshot backend — no etcd required
-            snapshot_root_ = "master_snapshot";
+            snapshot_root_ = "mooncake_master_snapshot";
             static std::atomic<int> snap_counter{0};
             localfs_snapshot_dir_ = "/tmp/ha_recovery_snap_" +
                                     std::to_string(getpid()) + "_" +
@@ -174,9 +174,9 @@ class HaRecoveryIntegrationTest
             ASSERT_NE(snapshot_write_backend_, nullptr);
         } else {
 #ifdef STORE_USE_ETCD
-            // Real backends use "master_snapshot" root (matches
+            // Real backends use "mooncake_master_snapshot" root (matches
             // MasterService::SNAPSHOT_ROOT used by RestoreState)
-            snapshot_root_ = "master_snapshot";
+            snapshot_root_ = "mooncake_master_snapshot";
             auto backend_type =
                 ParseSnapshotBackendType(config.snapshot_backend);
             snapshot_write_backend_ =

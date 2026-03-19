@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iomanip>
 #include <shared_mutex>
 #include <sstream>
 #include <regex>
@@ -1602,7 +1603,17 @@ auto MasterService::PutEnd(const UUID& client_id, const std::string& key,
     // Serialize metadata (replicas, size, lease) to payload so Standby can
     // restore complete metadata when promoted to Primary.
     std::string metadata_payload = SerializeMetadataForOpLog(metadata);
+#ifdef STORE_USE_ETCD
+    if (enable_ha_) {
+        AppendOrPersistOrEnqueue("PutEnd", OpType::PUT_END, key,
+                                 metadata_payload,
+                                 PendingMutationKind::EVICT_MEM_REPLICAS);
+    } else {
+        AppendOpLogAndNotify(OpType::PUT_END, key, metadata_payload);
+    }
+#else
     AppendOpLogAndNotify(OpType::PUT_END, key, metadata_payload);
+#endif
 
     return {};
 }
