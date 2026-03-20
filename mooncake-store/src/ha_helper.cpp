@@ -189,12 +189,21 @@ int MasterServiceSupervisor::Start() {
             return -1;
         }
 
+        // Connect to etcd store client only when using ETCD as OpLog backend.
+        // LocalFS OpLogStore does not need etcd connectivity for OpLog sync.
 #ifdef STORE_USE_ETCD
-        // Connect to etcd for OpLog sync
-        if (EtcdHelper::ConnectToEtcdStoreClient(
-                config_.etcd_endpoints.c_str()) != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to connect to etcd store client: "
-                       << config_.etcd_endpoints;
+        if (config_.oplog_store_type == OpLogStoreType::ETCD) {
+            if (EtcdHelper::ConnectToEtcdStoreClient(
+                    config_.etcd_endpoints.c_str()) != ErrorCode::OK) {
+                LOG(ERROR) << "Failed to connect to etcd store client: "
+                           << config_.etcd_endpoints;
+                return -1;
+            }
+        }
+#else
+        if (config_.oplog_store_type == OpLogStoreType::ETCD) {
+            LOG(ERROR) << "ETCD OpLog backend requested but STORE_USE_ETCD is "
+                          "not enabled at compile time";
             return -1;
         }
 #endif
@@ -257,10 +266,12 @@ int MasterServiceSupervisor::Start() {
 
         // If we were running as Standby, finalize catch-up and snapshot
         // metadata now.
+        // NOTE: This block is independent of the OpLog backend (etcd vs
+        // localfs). Promote/ExportMetadataSnapshot are pure in-memory
+        // operations on HotStandbyService.
         std::vector<std::pair<std::string, StandbyObjectMetadata>>
             standby_snapshot;
         uint64_t standby_last_seq_id = 0;
-#ifdef STORE_USE_ETCD
         if (had_standby && standby_service_ && standby_running_.load()) {
             LOG(INFO) << "Finalizing standby state for promotion...";
             standby_service_
@@ -274,7 +285,6 @@ int MasterServiceSupervisor::Start() {
                       << standby_snapshot.size()
                       << ", last_seq_id=" << standby_last_seq_id;
         }
-#endif
 
         // Start a thread to keep the leader alive
         auto keep_leader_thread =
@@ -294,12 +304,13 @@ int MasterServiceSupervisor::Start() {
             mooncake::WrappedMasterServiceConfig(config_, view_version));
 
         // Restore from promoted standby snapshot if available.
-#ifdef STORE_USE_ETCD
+        // NOTE: RestoreFromStandby is a pure in-memory operation that
+        // populates MasterService metadata from the standby snapshot.
+        // It works regardless of OpLog backend (etcd or localfs).
         if (standby_last_seq_id > 0 || !standby_snapshot.empty()) {
             wrapped_master_service.RestoreFromStandby(standby_snapshot,
                                                       standby_last_seq_id);
         }
-#endif
 
         mooncake::RegisterRpcService(server, wrapped_master_service);
         // Metric reporting is now handled by WrappedMasterService.
@@ -335,7 +346,6 @@ int MasterServiceSupervisor::Start() {
 
 void MasterServiceSupervisor::StartStandbyService(
     MasterViewHelper& mv_helper, const std::string& current_leader) {
-#ifdef STORE_USE_ETCD
     if (standby_running_.load()) {
         LOG(WARNING) << "Standby service is already running";
         return;
@@ -349,7 +359,6 @@ void MasterServiceSupervisor::StartStandbyService(
     standby_config.enable_verification = false;  // Disable verification for now
 
     // Snapshot bootstrap (default for new standby nodes):
-    // - In HA mode, snapshot backend is forced to ETCD (shared by all nodes).
     // - `enable_snapshot_restore` is ignored for primary startup.
     // - Standby nodes should always *try* snapshot bootstrap first, then replay
     //   OpLog from snapshot_sequence_id.
@@ -385,14 +394,9 @@ void MasterServiceSupervisor::StartStandbyService(
 
     standby_running_.store(true);
     LOG(INFO) << "Standby service started successfully";
-#else
-    LOG(WARNING)
-        << "STORE_USE_ETCD is not enabled, cannot start Standby service";
-#endif
 }
 
 void MasterServiceSupervisor::StopStandbyService() {
-#ifdef STORE_USE_ETCD
     if (!standby_running_.load()) {
         return;
     }
@@ -404,7 +408,6 @@ void MasterServiceSupervisor::StopStandbyService() {
 
     standby_running_.store(false);
     LOG(INFO) << "Standby service stopped";
-#endif
 }
 
 MasterServiceSupervisor::~MasterServiceSupervisor() {
