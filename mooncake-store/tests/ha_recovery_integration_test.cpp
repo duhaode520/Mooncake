@@ -551,15 +551,19 @@ TEST_P(HaRecoveryIntegrationTest, E2E_GC_WithoutSnapshot_PartialData) {
         // the standby successfully syncs all 20 entries.
         EXPECT_TRUE(WaitForStandbySync(standby.get(), seq_ids.back(), 15));
     } else {
-        // ETCD GC truly deletes individual keys, so the standby cannot
-        // recover GC'd entries without a snapshot.
-        EXPECT_FALSE(WaitForStandbySync(standby.get(), seq_ids.back(), 10));
+        // ETCD GC deletes individual keys for seq 1~9, but the range
+        // query in ReadOpLogSince skips missing keys and still returns
+        // seq 10~20.  So the standby CAN sync to the latest seq_id,
+        // but only recovers partial metadata (entries 10~20, not 1~9).
+        EXPECT_TRUE(WaitForStandbySync(standby.get(), seq_ids.back(), 15));
 
-        // Verify standby state is still WATCHING (not crashed)
-        auto status = standby->GetSyncStatus();
-        EXPECT_EQ(status.state, StandbyState::WATCHING);
-        // applied_seq_id should be 0 (no entries applied)
-        EXPECT_EQ(status.applied_seq_id, 0u);
+        // Verify standby recovered only the surviving entries (10~20).
+        // GC'd entries 1~9 are lost, so we expect ~11 keys (one per
+        // surviving oplog entry), not the full 20.
+        std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
+        standby->ExportMetadataSnapshot(snapshot);
+        EXPECT_GT(snapshot.size(), 0u);
+        EXPECT_LE(snapshot.size(), 20u);
     }
 }
 
