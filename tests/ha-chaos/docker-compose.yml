@@ -1,0 +1,245 @@
+# =============================================================================
+# Mooncake HA Chaos Test — Docker Compose
+#
+# Architecture:
+#   etcd (1)  →  master-1, master-2, master-3  ←  http-meta (1)
+#                          ↑↑↑
+#             client-1, client-2 (real_client + TCP transport)
+#
+# Network: all containers share a dedicated bridge "mc-chaos-net"
+# Shared volume: oplog-data (NFS-like shared localfs oplog store)
+# =============================================================================
+
+services:
+  # ─── etcd ──────────────────────────────────────────────────────────────
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    container_name: mc-etcd
+    environment:
+      - ETCD_NAME=etcd0
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_CLUSTER=etcd0=http://etcd:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=mc-chaos
+      - ETCD_LOG_LEVEL=warn
+    ports:
+      - "2379:2379"
+    networks:
+      - mc-chaos-net
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ─── HTTP Metadata Server (for TransferEngine endpoint exchange) ─────
+  http-meta:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-http-meta
+    command: >
+      python3 -c "
+      import asyncio
+      from aiohttp import web
+      import json
+
+      store = {}
+      lock = asyncio.Lock()
+
+      async def handler(request):
+          if request.method == 'GET':
+              key = request.query.get('key', '')
+              if not key:
+                  return web.json_response(store)
+              val = store.get(key)
+              if val is None:
+                  return web.Response(status=404, text='Not found')
+              return web.Response(text=json.dumps(val), content_type='application/json')
+          elif request.method == 'PUT':
+              body = await request.json()
+              key = body.get('key', '')
+              value = body.get('value', body)
+              async with lock:
+                  if key in store and body.get('type') == 'rpc_meta':
+                      return web.Response(status=400, text='Duplicate rpc_meta')
+                  store[key] = value
+              return web.Response(status=200, text='OK')
+          elif request.method == 'DELETE':
+              key = request.query.get('key', '')
+              async with lock:
+                  store.pop(key, None)
+              return web.Response(status=200, text='OK')
+
+      app = web.Application()
+      app.router.add_route('*', '/metadata', handler)
+      web.run_app(app, host='0.0.0.0', port=8080)
+      "
+    ports:
+      - "8080:8080"
+    networks:
+      - mc-chaos-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/metadata"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── Master 1 ──────────────────────────────────────────────────────────
+  master-1:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-master-1
+    hostname: master-1
+    command: >
+      mooncake_master
+        --config_path=/etc/mooncake/master_ha.json
+        --rpc_port=50051
+        --metrics_port=9001
+    volumes:
+      - oplog-data:/data/oplog
+    depends_on:
+      etcd:
+        condition: service_healthy
+    ports:
+      - "50051:50051"
+      - "9001:9001"
+    networks:
+      - mc-chaos-net
+    restart: unless-stopped
+
+  # ─── Master 2 ──────────────────────────────────────────────────────────
+  master-2:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-master-2
+    hostname: master-2
+    command: >
+      mooncake_master
+        --config_path=/etc/mooncake/master_ha.json
+        --rpc_port=50052
+        --metrics_port=9002
+    volumes:
+      - oplog-data:/data/oplog
+    depends_on:
+      etcd:
+        condition: service_healthy
+    ports:
+      - "50052:50052"
+      - "9002:9002"
+    networks:
+      - mc-chaos-net
+    restart: unless-stopped
+
+  # ─── Master 3 ──────────────────────────────────────────────────────────
+  master-3:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-master-3
+    hostname: master-3
+    command: >
+      mooncake_master
+        --config_path=/etc/mooncake/master_ha.json
+        --rpc_port=50053
+        --metrics_port=9003
+    volumes:
+      - oplog-data:/data/oplog
+    depends_on:
+      etcd:
+        condition: service_healthy
+    ports:
+      - "50053:50053"
+      - "9003:9003"
+    networks:
+      - mc-chaos-net
+    restart: unless-stopped
+
+  # ─── Real Client 1 ─────────────────────────────────────────────────────
+  client-1:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-client-1
+    hostname: client-1
+    environment:
+      - MC_FORCE_TCP=1
+    command: >
+      mooncake_client
+        --host=client-1
+        --metadata_server=http://http-meta:8080/metadata
+        --master_server_address=etcd://etcd:2379
+        --protocol=tcp
+        --port=12888
+        --global_segment_size=256MB
+        --threads=2
+    depends_on:
+      etcd:
+        condition: service_healthy
+      http-meta:
+        condition: service_healthy
+    ports:
+      - "12888:12888"
+    networks:
+      - mc-chaos-net
+    restart: unless-stopped
+
+  # ─── Real Client 2 ─────────────────────────────────────────────────────
+  client-2:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-client-2
+    hostname: client-2
+    environment:
+      - MC_FORCE_TCP=1
+    command: >
+      mooncake_client
+        --host=client-2
+        --metadata_server=http://http-meta:8080/metadata
+        --master_server_address=etcd://etcd:2379
+        --protocol=tcp
+        --port=12889
+        --global_segment_size=256MB
+        --threads=2
+    depends_on:
+      etcd:
+        condition: service_healthy
+      http-meta:
+        condition: service_healthy
+    ports:
+      - "12889:12889"
+    networks:
+      - mc-chaos-net
+    restart: unless-stopped
+
+  # ─── Chaos Orchestrator (pytest runner) ────────────────────────────────
+  chaos-runner:
+    image: ${MOONCAKE_IMAGE:-mooncake-ha-chaos:latest}
+    container_name: mc-chaos-runner
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MASTER_HOSTS=master-1:50051,master-2:50052,master-3:50053
+      - MASTER_HTTP_PORTS=master-1:9001,master-2:9002,master-3:9003
+      - CLIENT_ADDRS=client-1:12888,client-2:12889
+      - METADATA_SERVER=http://http-meta:8080/metadata
+      - MC_FORCE_TCP=1
+      - PYTHONUNBUFFERED=1
+    command: >
+      python3 -m pytest /opt/chaos-tests/
+        -v
+        --tb=long
+        --timeout=600
+        -x
+    depends_on:
+      - master-1
+      - master-2
+      - master-3
+      - client-1
+      - client-2
+      - http-meta
+    networks:
+      - mc-chaos-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  oplog-data:
+
+networks:
+  mc-chaos-net:
+    driver: bridge
