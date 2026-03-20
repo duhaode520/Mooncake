@@ -640,6 +640,120 @@ TEST_P(HaRecoveryIntegrationTest, E2E_PromotionWithConcurrentWrites) {
 }
 
 // ============================================================
+// Scenario 4: All-Standby-First Cold Start (spec §8.1)
+// ============================================================
+
+// Verifies the core All-Standby-First semantic: Standby starts with
+// empty primary_address, recovers from oplog store, promotes, and
+// exports complete metadata — simulating a cold-start node that wins
+// election after recovery.
+TEST_P(HaRecoveryIntegrationTest, E2E_AllStandbyFirst_ColdStart) {
+    // Primary writes 15 entries
+    auto seq_ids = WriteEntries(15);
+    ASSERT_EQ(seq_ids.size(), 15u);
+    uint64_t last_seq = seq_ids.back();
+
+    // Start standby with empty primary_address (All-Standby-First pattern)
+    auto standby = StartStandby(/*enable_snapshot=*/false);
+    ASSERT_NE(standby, nullptr);
+    StandbyServiceGuard guard(standby.get());
+
+    // Wait for full oplog replay
+    ASSERT_TRUE(WaitForStandbySync(standby.get(), last_seq))
+        << "Standby did not sync to seq " << last_seq;
+
+    // Simulate winning election: Promote + export
+    ErrorCode err = standby->Promote();
+    ASSERT_EQ(ErrorCode::OK, err);
+
+    uint64_t promoted_seq = standby->GetLatestAppliedSequenceId();
+    EXPECT_GE(promoted_seq, last_seq);
+
+    std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
+    ASSERT_TRUE(standby->ExportMetadataSnapshot(snapshot));
+    EXPECT_EQ(snapshot.size(), 15u);
+}
+
+// Cold start with existing snapshot: Standby bootstraps from snapshot,
+// replays incremental oplog, then promotes with complete data.
+TEST_P(HaRecoveryIntegrationTest, E2E_AllStandbyFirst_ColdStartWithSnapshot) {
+    // Primary writes 20 entries
+    auto seq_ids = WriteEntries(20);
+    ASSERT_EQ(seq_ids.size(), 20u);
+    uint64_t last_seq = seq_ids.back();
+
+    // Inject snapshot covering first 10 entries
+    auto snap_data = BuildSnapshotData(10);
+    InjectSnapshot("snap_cold_" + cluster_id_, 10, snap_data);
+
+    // Start standby (All-Standby-First: empty primary_address)
+    auto standby = StartStandby(/*enable_snapshot=*/true);
+    ASSERT_NE(standby, nullptr);
+    StandbyServiceGuard guard(standby.get());
+
+    // Standby should bootstrap from snapshot + replay oplog 11~20
+    ASSERT_TRUE(WaitForStandbySync(standby.get(), last_seq))
+        << "Standby did not sync to seq " << last_seq;
+
+    // Promote and verify complete data
+    ErrorCode err = standby->Promote();
+    ASSERT_EQ(ErrorCode::OK, err);
+
+    std::vector<std::pair<std::string, StandbyObjectMetadata>> snapshot;
+    ASSERT_TRUE(standby->ExportMetadataSnapshot(snapshot));
+    EXPECT_EQ(snapshot.size(), 20u);
+}
+
+// Verifies spec §4.2: OpLog is indexed by cluster_id, not by leader.
+// When the writer changes (simulating leader failover), Standby
+// transparently picks up new entries without restart.
+TEST_P(HaRecoveryIntegrationTest, E2E_AllStandbyFirst_LeaderSwitch) {
+    // First "leader" writes 10 entries
+    auto seq_ids = WriteEntries(10);
+    uint64_t first_batch_last = seq_ids.back();
+
+    // Start standby
+    auto standby = StartStandby(/*enable_snapshot=*/false);
+    ASSERT_NE(standby, nullptr);
+    StandbyServiceGuard guard(standby.get());
+
+    ASSERT_TRUE(WaitForStandbySync(standby.get(), first_batch_last));
+
+    // Simulate leader switch: create a NEW OpLogManager (new "leader")
+    // writing to the SAME cluster_id
+    auto config = GetParam();
+    auto writer2_store = OpLogStoreFactory::Create(
+        config.oplog_store_type, cluster_id_, OpLogStoreRole::WRITER,
+        localfs_test_dir_, kLocalFsPollIntervalMs);
+    ASSERT_NE(writer2_store, nullptr);
+
+    OpLogManager second_leader;
+    second_leader.SetOpLogStore(
+        std::shared_ptr<OpLogStore>(std::move(writer2_store)));
+    second_leader.SetInitialSequenceId(first_batch_last);
+
+    // Second "leader" writes 10 more entries
+    for (int i = 10; i < 20; ++i) {
+        std::string key = "key_" + std::to_string(i);
+        std::string payload = MakeValidPayload();
+        if (i < 19) {
+            second_leader.Append(OpType::PUT_END, key, payload);
+        } else {
+            auto result =
+                second_leader.AppendAndPersist(OpType::PUT_END, key, payload);
+            ASSERT_TRUE(result.has_value());
+        }
+    }
+
+    uint64_t final_seq = second_leader.GetLastSequenceId();
+
+    // Standby should pick up entries from the new writer transparently
+    ASSERT_TRUE(WaitForStandbySync(standby.get(), final_seq, 30))
+        << "Standby did not sync after leader switch to seq " << final_seq;
+    VerifyStandbyMetadata(standby.get(), 20);
+}
+
+// ============================================================
 // main() — parse gflags for --etcd_endpoints
 // ============================================================
 
