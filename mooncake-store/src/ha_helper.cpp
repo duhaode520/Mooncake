@@ -9,6 +9,7 @@
 #include "hot_standby_service.h"
 #include "rpc_service.h"
 #include "serializer_snapshot_provider.h"
+#include "standby_state_machine.h"
 
 namespace mooncake {
 
@@ -77,8 +78,7 @@ ErrorCode MasterViewHelper::ConnectToEtcd(const std::string& etcd_endpoints) {
 
 void MasterViewHelper::ElectLeader(const std::string& master_address,
                                    ViewVersionId& version,
-                                   EtcdLeaseId& lease_id,
-                                   LeaderDiscoveredCallback on_leader_discovered) {
+                                   EtcdLeaseId& lease_id) {
     while (true) {
         // Check if there is already a leader
         ViewVersionId current_version = 0;
@@ -93,13 +93,6 @@ void MasterViewHelper::ElectLeader(const std::string& master_address,
         } else if (ret != ErrorCode::ETCD_KEY_NOT_EXIST) {
             LOG(INFO) << "CurrentLeader=" << current_master
                       << ", CurrentVersion=" << current_version;
-            // Notify the caller so it can start services (e.g. Standby)
-            // while we wait for the leader to disappear.
-            if (on_leader_discovered) {
-                on_leader_discovered(current_master);
-            }
-            // In rare cases, the leader may be ourselves, but it does not
-            // matter. We will watch the key until it's deleted.
             LOG(INFO) << "Waiting for leadership change...";
             auto ret = EtcdHelper::WatchUntilDeleted(master_view_key_.c_str(),
                                                      master_view_key_.size());
@@ -171,6 +164,7 @@ MasterServiceSupervisor::MasterServiceSupervisor(
     : config_(config) {}
 
 int MasterServiceSupervisor::Start() {
+    bool is_first_iteration = true;
     while (true) {
         LOG(INFO) << "Init master service...";
         coro_rpc::coro_rpc_server server(
@@ -208,115 +202,75 @@ int MasterServiceSupervisor::Start() {
         }
 #endif
 
-        LOG(INFO) << "Checking for existing leader...";
+        // --- ① Unconditionally start Standby for oplog recovery ---
+        auto standby_err = StartStandbyService();
+        if (standby_err != ErrorCode::OK) {
+            if (is_first_iteration) {
+                LOG(ERROR)
+                    << "Standby start failed on initial startup: "
+                    << standby_err << ", aborting process";
+                return -1;
+            }
+            LOG(ERROR) << "Standby start failed on re-entry: " << standby_err
+                       << ", will retry after sleep";
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            continue;
+        }
+
+        // --- ② Wait for Standby recovery to complete ---
+        WaitForStandbyReady();
+
+        // --- ③ Participate in leader election (no callback needed) ---
         EtcdLeaseId lease_id = 0;
         ViewVersionId view_version = 0;
+        mv_helper.ElectLeader(config_.local_hostname, view_version, lease_id);
+        // Only the election winner reaches here.
 
-        // Check if there is already a leader
-        std::string current_leader;
-        ViewVersionId current_version = 0;
-        auto ret = mv_helper.GetMasterView(current_leader, current_version);
-        bool had_standby = false;
-
-        if (ret == ErrorCode::OK) {
-            // There is an existing leader, start Standby service
-            LOG(INFO) << "Found existing leader: " << current_leader
-                      << ", starting Standby service...";
-            StartStandbyService(mv_helper, current_leader);
-            had_standby = true;
-
-            // Watch until leader is deleted
-            LOG(INFO) << "Watching for leadership change...";
-            auto watch_ret = EtcdHelper::WatchUntilDeleted(
-                mv_helper.GetMasterViewKey().c_str(),
-                mv_helper.GetMasterViewKey().size());
-
-            if (watch_ret != ErrorCode::OK) {
-                LOG(ERROR) << "Error watching for leadership change: "
-                           << watch_ret;
-                // Stop Standby service on watch error and retry.
-                StopStandbyService();
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                continue;
-            }
-
-            LOG(INFO)
-                << "Leader disappeared, trying to elect self as leader...";
-        } else {
-            LOG(INFO) << "No existing leader found, trying to elect self as "
-                         "leader...";
+        // --- ④ Promote: final catch-up + export metadata ---
+        LOG(INFO) << "Won election, promoting standby...";
+        auto promote_err = standby_service_->Promote();
+        if (promote_err != ErrorCode::OK) {
+            LOG(ERROR) << "Promote failed: " << promote_err
+                       << ", proceeding with best-effort data";
         }
+        LOG(INFO) << "Promote completed, state="
+                  << StandbyStateToString(standby_service_->GetState());
 
-        // Try to elect self as leader.
-        // Pass a callback so that if ElectLeader discovers another leader
-        // inside its retry loop (race: we missed the leader above but it
-        // appeared before our CAS), Standby will be started on-the-fly.
-        mv_helper.ElectLeader(
-            config_.local_hostname, view_version, lease_id,
-            [this, &mv_helper, &had_standby](
-                const std::string& leader_addr) {
-                LOG(INFO)
-                    << "ElectLeader discovered leader: " << leader_addr
-                    << ", ensuring Standby is running...";
-                if (!standby_running_.load()) {
-                    StartStandbyService(mv_helper, leader_addr);
-                    had_standby = true;
-                }
-            });
-
-        // If we were running as Standby, finalize catch-up and snapshot
-        // metadata now.
-        // NOTE: This block is independent of the OpLog backend (etcd vs
-        // localfs). Promote/ExportMetadataSnapshot are pure in-memory
-        // operations on HotStandbyService.
+        uint64_t standby_last_seq_id =
+            standby_service_->GetLatestAppliedSequenceId();
         std::vector<std::pair<std::string, StandbyObjectMetadata>>
             standby_snapshot;
-        uint64_t standby_last_seq_id = 0;
-        if (had_standby && standby_service_ && standby_running_.load()) {
-            LOG(INFO) << "Finalizing standby state for promotion...";
-            standby_service_
-                ->Promote();  // does final catch-up sync + stops watcher
-            standby_last_seq_id =
-                standby_service_->GetLatestAppliedSequenceId();
-            standby_service_->ExportMetadataSnapshot(standby_snapshot);
-            // We are now leader; standby service is no longer needed.
-            StopStandbyService();
-            LOG(INFO) << "Standby snapshot ready: keys="
-                      << standby_snapshot.size()
-                      << ", last_seq_id=" << standby_last_seq_id;
-        }
+        standby_service_->ExportMetadataSnapshot(standby_snapshot);
 
-        // Start a thread to keep the leader alive
+        // --- ⑤ Stop Standby ---
+        StopStandbyService();
+        LOG(INFO) << "Standby snapshot ready: keys=" << standby_snapshot.size()
+                  << ", last_seq_id=" << standby_last_seq_id;
+
+        // --- ⑥ Wait for old leader to retire (split-brain prevention) ---
         auto keep_leader_thread =
             std::thread([&server, &mv_helper, lease_id]() {
                 mv_helper.KeepLeader(lease_id);
                 LOG(INFO) << "Trying to stop server...";
                 server.stop();
             });
-
-        // To prevent potential split-brain, wait long enough for the old leader
-        // to retire.
         const int waiting_time = ETCD_MASTER_VIEW_LEASE_TTL;
         std::this_thread::sleep_for(std::chrono::seconds(waiting_time));
 
+        // --- ⑦ Create MasterService + restore data ---
         LOG(INFO) << "Starting master service...";
         mooncake::WrappedMasterService wrapped_master_service(
             mooncake::WrappedMasterServiceConfig(config_, view_version));
 
-        // Restore from promoted standby snapshot if available.
-        // NOTE: RestoreFromStandby is a pure in-memory operation that
-        // populates MasterService metadata from the standby snapshot.
-        // It works regardless of OpLog backend (etcd or localfs).
         if (standby_last_seq_id > 0 || !standby_snapshot.empty()) {
             wrapped_master_service.RestoreFromStandby(standby_snapshot,
                                                       standby_last_seq_id);
         }
 
+        // --- ⑧ Serve ---
         mooncake::RegisterRpcService(server, wrapped_master_service);
-        // Metric reporting is now handled by WrappedMasterService.
 
-        async_simple::Future<coro_rpc::err_code> ec =
-            server.async_start();  // won't block here
+        async_simple::Future<coro_rpc::err_code> ec = server.async_start();
         if (ec.hasResult()) {
             LOG(ERROR) << "Failed to start master service: "
                        << ec.result().value();
@@ -325,43 +279,37 @@ int MasterServiceSupervisor::Start() {
                 LOG(ERROR) << "Failed to cancel keep leader alive: "
                            << etcd_err;
             }
-            // Even if CancelKeepAlive fails, the keep alive context are closed.
-            // We can safely join the keep leader thread.
             keep_leader_thread.join();
-            return -1;
+            is_first_iteration = false;
+            continue;
         }
+
         // Block until the server is stopped
         auto server_err = std::move(ec).get();
         LOG(ERROR) << "Master service stopped: " << server_err;
 
-        // If the server is closed due to internal errors, we need to manually
-        // stop keep leader alive.
         auto etcd_err = EtcdHelper::CancelKeepAlive(lease_id);
-        // The error here is predicatable, no need to log it as ERROR.
         LOG(INFO) << "Cancel keep leader alive: " << etcd_err;
         keep_leader_thread.join();
+
+        is_first_iteration = false;
     }
     return 0;
 }
 
-void MasterServiceSupervisor::StartStandbyService(
-    MasterViewHelper& mv_helper, const std::string& current_leader) {
+ErrorCode MasterServiceSupervisor::StartStandbyService() {
     if (standby_running_.load()) {
         LOG(WARNING) << "Standby service is already running";
-        return;
+        return ErrorCode::OK;
     }
 
     HotStandbyConfig standby_config;
     standby_config.standby_id = config_.local_hostname;
-    standby_config.primary_address = current_leader;
+    standby_config.primary_address = "";  // Not used in etcd/localfs sync
     standby_config.verification_interval_sec = 30;
     standby_config.max_replication_lag_entries = 1000;
-    standby_config.enable_verification = false;  // Disable verification for now
+    standby_config.enable_verification = false;
 
-    // Snapshot bootstrap (default for new standby nodes):
-    // - `enable_snapshot_restore` is ignored for primary startup.
-    // - Standby nodes should always *try* snapshot bootstrap first, then replay
-    //   OpLog from snapshot_sequence_id.
     standby_config.enable_snapshot_bootstrap = true;
     standby_config.oplog_store_type = config_.oplog_store_type;
     standby_config.oplog_store_root_dir = config_.oplog_store_root_dir;
@@ -371,11 +319,8 @@ void MasterServiceSupervisor::StartStandbyService(
                                                            : "disabled")
               << ", snapshot_backend="
               << SnapshotBackendTypeToString(config_.snapshot_backend_type)
-              << ", enable_snapshot=" << (config_.enable_snapshot ? 1 : 0)
-              << ", enable_snapshot_restore_ignored=1";
+              << ", enable_snapshot=" << (config_.enable_snapshot ? 1 : 0);
 
-    // Inject a snapshot provider matching the configured backend.
-    // MasterService uses SNAPSHOT_ROOT="mooncake_master_snapshot".
     standby_service_ = std::make_unique<HotStandbyService>(standby_config);
     standby_service_->SetSnapshotProvider(
         std::make_unique<SerializerBackendSnapshotProvider>(
@@ -385,15 +330,24 @@ void MasterServiceSupervisor::StartStandbyService(
             /*snapshot_root=*/"mooncake_master_snapshot"));
 
     ErrorCode err = standby_service_->Start(
-        current_leader, config_.etcd_endpoints, config_.cluster_id);
+        /*primary_address=*/"", config_.etcd_endpoints, config_.cluster_id);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "Failed to start Standby service: " << err;
         standby_service_.reset();
-        return;
+        return err;
     }
 
     standby_running_.store(true);
     LOG(INFO) << "Standby service started successfully";
+    return ErrorCode::OK;
+}
+
+void MasterServiceSupervisor::WaitForStandbyReady() {
+    // HotStandbyService::Start() is synchronous — it returns OK only after
+    // snapshot bootstrap + oplog replay + entering WATCHING state.
+    // This method is reserved for future async Start mode.
+    LOG(INFO) << "Standby is ready, state="
+              << StandbyStateToString(standby_service_->GetState());
 }
 
 void MasterServiceSupervisor::StopStandbyService() {
