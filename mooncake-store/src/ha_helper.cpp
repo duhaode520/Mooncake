@@ -206,9 +206,8 @@ int MasterServiceSupervisor::Start() {
         auto standby_err = StartStandbyService();
         if (standby_err != ErrorCode::OK) {
             if (is_first_iteration) {
-                LOG(ERROR)
-                    << "Standby start failed on initial startup: "
-                    << standby_err << ", aborting process";
+                LOG(ERROR) << "Standby start failed on initial startup: "
+                           << standby_err << ", aborting process";
                 return -1;
             }
             LOG(ERROR) << "Standby start failed on re-entry: " << standby_err

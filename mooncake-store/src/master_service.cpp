@@ -3379,8 +3379,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
 
             // If any upload failed in continue-all mode, return combined error
             if (!all_errors.empty()) {
-                return tl::make_unexpected(SerializationError(
-                    ErrorCode::PERSISTENT_FAIL, all_errors));
+                return tl::make_unexpected(
+                    SerializationError(ErrorCode::PERSISTENT_FAIL, all_errors));
             }
 
             // Update latest marker last (only if core files succeeded)
