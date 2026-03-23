@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "metadata_store.h"
+#include "types.h"
 
 namespace mooncake {
 
@@ -36,6 +37,14 @@ class SnapshotProvider {
         uint64_t& snapshot_sequence_id,
         std::vector<std::pair<std::string, StandbyObjectMetadata>>&
             snapshot) = 0;
+
+    // Return segments from the loaded snapshot for restoring SegmentManager
+    // during HA promote. Default returns false (unsupported, e.g. etcd path).
+    virtual bool GetSnapshotSegments(
+        std::vector<std::pair<Segment, UUID>>& segments) const {
+        segments.clear();
+        return false;
+    }
 };
 
 // Default no-op provider: behaves as if "no snapshot available".

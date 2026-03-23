@@ -35,7 +35,8 @@ class SerializerSnapshotProviderLocalTest
         std::filesystem::remove_all(snapshot_local_path_, ec);
         std::filesystem::create_directories(snapshot_local_path_, ec);
 
-        ::setenv("MOONCAKE_SNAPSHOT_LOCAL_PATH", snapshot_local_path_.c_str(), 1);
+        ::setenv("MOONCAKE_SNAPSHOT_LOCAL_PATH", snapshot_local_path_.c_str(),
+                 1);
     }
 
     void TearDown() override {

@@ -29,12 +29,19 @@ class SerializerBackendSnapshotProvider final : public SnapshotProvider {
         std::vector<std::pair<std::string, StandbyObjectMetadata>>& snapshot)
         override;
 
+    bool GetSnapshotSegments(
+        std::vector<std::pair<Segment, UUID>>& segments) const override {
+        segments = cached_segments_;
+        return !segments.empty();
+    }
+
    private:
     std::string snapshot_root_;
     std::unique_ptr<SerializerBackend> backend_;
     SnapshotBackendType backend_type_;
     std::string etcd_endpoints_;
     BufferAllocatorType memory_allocator_type_;
+    std::vector<std::pair<Segment, UUID>> cached_segments_;
 };
 
 }  // namespace mooncake

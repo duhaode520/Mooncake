@@ -169,6 +169,15 @@ bool SerializerBackendSnapshotProvider::LoadLatestSnapshot(
         // Caller can choose to set memory_allocator_type_ to OFFSET in config.
         master.ExportStandbySnapshot(snapshot, snapshot_sequence_id,
                                      /*include_memory_replicas=*/true);
+
+        // Export segments for HA promote path
+        cached_segments_.clear();
+        auto seg_err = master.ExportSegments(cached_segments_);
+        if (seg_err != ErrorCode::OK) {
+            LOG(WARNING) << "[Standby] Failed to export segments for HA "
+                            "promote, err="
+                         << seg_err;
+        }
     }
 
     if (!restored) {

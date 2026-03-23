@@ -287,6 +287,9 @@ ErrorCode HotStandbyService::Start(const std::string& primary_address,
             // Align applier to snapshot boundary.
             oplog_applier_->Recover(snapshot_seq_id);
             baseline_seq_id = snapshot_seq_id;
+
+            // Preserve snapshot segments for promote path
+            snapshot_provider_->GetSnapshotSegments(snapshot_segments_);
         } else {
             LOG(WARNING) << "Snapshot bootstrap enabled but no snapshot is "
                             "available yet; "
@@ -621,6 +624,13 @@ bool HotStandbyService::ExportMetadataSnapshot(
     }
     metadata_store_->Snapshot(out);
     return true;
+}
+
+bool HotStandbyService::ExportSnapshotSegments(
+    std::vector<std::pair<Segment, UUID>>& out) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    out = snapshot_segments_;
+    return !out.empty();
 }
 
 void HotStandbyService::SetSnapshotProvider(

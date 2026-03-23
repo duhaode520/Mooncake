@@ -419,12 +419,21 @@ void MasterService::RestoreFromStandbySnapshot(
     standby_allocator_keepalive_.clear();
     auto get_keepalive_allocator = [this](const std::string& transport_endpoint)
         -> std::shared_ptr<BufferAllocatorBase> {
+        // Priority 1: real allocator from RestoreSegments()
+        auto real_it = restored_segment_allocators_.find(transport_endpoint);
+        if (real_it != restored_segment_allocators_.end()) {
+            return real_it->second;
+        }
+
+        // Priority 2: existing keepalive (re-entry)
         auto it = standby_allocator_keepalive_.find(transport_endpoint);
         if (it != standby_allocator_keepalive_.end()) {
             return it->second;
         }
+
+        // Fallback: DummyAllocator (etcd path or unknown segments)
         auto alloc = std::make_shared<DummyBufferAllocator>(
-            /*segment_name=*/std::string(), transport_endpoint);
+            /*segment_name=*/transport_endpoint, transport_endpoint);
         standby_allocator_keepalive_.emplace(transport_endpoint, alloc);
         return alloc;
     };
@@ -485,6 +494,56 @@ void MasterService::RestoreFromStandbySnapshot(
     LOG(INFO) << "Restored metadata from standby snapshot: restored_keys="
               << restored << ", restored_mem_size=" << total_restored_mem_size
               << ", initial_oplog_sequence_id=" << initial_oplog_sequence_id;
+
+    // Clear the temporary allocator map; real allocators are now held by
+    // SegmentManager and referenced via standby_allocator_keepalive_.
+    restored_segment_allocators_.clear();
+}
+
+ErrorCode MasterService::ExportSegments(
+    std::vector<std::pair<Segment, UUID>>& out) {
+    ScopedSegmentAccess access = segment_manager_.getSegmentAccess();
+    ErrorCode err = access.GetAllSegments(out);
+    if (err != ErrorCode::OK) {
+        LOG(WARNING) << "ExportSegments failed: " << err;
+        out.clear();
+    }
+    return err;
+}
+
+void MasterService::RestoreSegments(
+    const std::vector<std::pair<Segment, UUID>>& segments) {
+    // Phase 1: Mount all segments (exclusive lock)
+    {
+        ScopedSegmentAccess access = segment_manager_.getSegmentAccess();
+        for (const auto& [segment, client_id] : segments) {
+            auto err = access.MountSegment(segment, client_id);
+            if (err != ErrorCode::OK &&
+                err != ErrorCode::SEGMENT_ALREADY_EXISTS) {
+                LOG(WARNING) << "RestoreSegments: failed to mount segment="
+                             << segment.name << ", err=" << err;
+            }
+        }
+    }  // unique_lock released
+
+    // Phase 2: Build te_endpoint → allocator map (shared lock)
+    restored_segment_allocators_.clear();
+    {
+        ScopedAllocatorAccess alloc_access =
+            segment_manager_.getAllocatorAccess();
+        for (const auto& [seg, cid] : segments) {
+            const auto* allocators =
+                alloc_access.getAllocatorManager().getAllocators(seg.name);
+            if (allocators && !allocators->empty()) {
+                restored_segment_allocators_[seg.te_endpoint] =
+                    allocators->front();
+            }
+        }
+    }  // shared_lock released
+
+    LOG(INFO) << "RestoreSegments: mounted " << segments.size()
+              << " segments, built " << restored_segment_allocators_.size()
+              << " endpoint->allocator mappings";
 }
 
 void MasterService::ExportStandbySnapshot(
@@ -3379,8 +3438,8 @@ tl::expected<void, SerializationError> MasterService::UploadSnapshot(
 
             // If any upload failed in continue-all mode, return combined error
             if (!all_errors.empty()) {
-                return tl::make_unexpected(SerializationError(
-                    ErrorCode::PERSISTENT_FAIL, all_errors));
+                return tl::make_unexpected(
+                    SerializationError(ErrorCode::PERSISTENT_FAIL, all_errors));
             }
 
             // Update latest marker last (only if core files succeeded)

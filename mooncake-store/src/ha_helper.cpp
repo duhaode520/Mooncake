@@ -206,9 +206,8 @@ int MasterServiceSupervisor::Start() {
         auto standby_err = StartStandbyService();
         if (standby_err != ErrorCode::OK) {
             if (is_first_iteration) {
-                LOG(ERROR)
-                    << "Standby start failed on initial startup: "
-                    << standby_err << ", aborting process";
+                LOG(ERROR) << "Standby start failed on initial startup: "
+                           << standby_err << ", aborting process";
                 return -1;
             }
             LOG(ERROR) << "Standby start failed on re-entry: " << standby_err
@@ -242,6 +241,10 @@ int MasterServiceSupervisor::Start() {
             standby_snapshot;
         standby_service_->ExportMetadataSnapshot(standby_snapshot);
 
+        // Export segments for promoted Master to restore SegmentManager
+        std::vector<std::pair<Segment, UUID>> snapshot_segments;
+        standby_service_->ExportSnapshotSegments(snapshot_segments);
+
         // --- ⑤ Stop Standby ---
         StopStandbyService();
         LOG(INFO) << "Standby snapshot ready: keys=" << standby_snapshot.size()
@@ -263,6 +266,10 @@ int MasterServiceSupervisor::Start() {
             mooncake::WrappedMasterServiceConfig(config_, view_version));
 
         if (standby_last_seq_id > 0 || !standby_snapshot.empty()) {
+            // Restore segments first (build real allocators)
+            if (!snapshot_segments.empty()) {
+                wrapped_master_service.RestoreSegments(snapshot_segments);
+            }
             wrapped_master_service.RestoreFromStandby(standby_snapshot,
                                                       standby_last_seq_id);
         }

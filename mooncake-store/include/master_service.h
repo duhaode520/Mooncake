@@ -131,6 +131,13 @@ class MasterService {
         std::vector<std::pair<std::string, StandbyObjectMetadata>>& out,
         uint64_t last_sequence_id, bool include_memory_replicas = true) const;
 
+    // Export all mounted segments (for HA snapshot provider to cache)
+    ErrorCode ExportSegments(std::vector<std::pair<Segment, UUID>>& out);
+
+    // Restore segments from snapshot data (called before
+    // RestoreFromStandbySnapshot during promote)
+    void RestoreSegments(const std::vector<std::pair<Segment, UUID>>& segments);
+
     // Get current OpLog last sequence_id (used to align standby baseline).
     uint64_t GetOpLogLastSequenceId() const;
 
@@ -1228,6 +1235,12 @@ class MasterService {
     // descriptors.
     std::unordered_map<std::string, std::shared_ptr<BufferAllocatorBase>>
         standby_allocator_keepalive_;
+
+    // transport_endpoint → real allocator, built by RestoreSegments()
+    // Used by RestoreFromStandbySnapshot to find real allocators instead
+    // of creating DummyBufferAllocator.
+    std::unordered_map<std::string, std::shared_ptr<BufferAllocatorBase>>
+        restored_segment_allocators_;
 
     // Operation log manager for hot-standby replication. It records
     // state-changing operations so that a standby master can replay them.

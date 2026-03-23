@@ -41,6 +41,9 @@ class WrappedMasterService {
             snapshot,
         uint64_t initial_oplog_sequence_id);
 
+    // Restore segments before metadata during HA promote
+    void RestoreSegments(const std::vector<std::pair<Segment, UUID>>& segments);
+
     tl::expected<bool, ErrorCode> ExistKey(const std::string& key);
 
     tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>

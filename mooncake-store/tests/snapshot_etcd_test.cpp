@@ -319,8 +319,10 @@ TEST_F(SnapshotEtcdTest, SnapshotPersistViaDaemon) {
     // Fetch manifest/latest/metadata/segments from etcd
     std::string manifest_key =
         "mooncake_master_snapshot/" + snapshot_id + "/manifest.txt";
-    std::string metadata_key = "mooncake_master_snapshot/" + snapshot_id + "/metadata";
-    std::string segments_key = "mooncake_master_snapshot/" + snapshot_id + "/segments";
+    std::string metadata_key =
+        "mooncake_master_snapshot/" + snapshot_id + "/metadata";
+    std::string segments_key =
+        "mooncake_master_snapshot/" + snapshot_id + "/segments";
     std::string latest_key = "mooncake_master_snapshot/latest.txt";
 
     std::string manifest_value;

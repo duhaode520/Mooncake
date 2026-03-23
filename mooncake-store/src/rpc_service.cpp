@@ -78,6 +78,11 @@ void WrappedMasterService::RestoreFromStandby(
                                                initial_oplog_sequence_id);
 }
 
+void WrappedMasterService::RestoreSegments(
+    const std::vector<std::pair<Segment, UUID>>& segments) {
+    master_service_.RestoreSegments(segments);
+}
+
 void WrappedMasterService::init_http_server() {
     using namespace coro_http;
 

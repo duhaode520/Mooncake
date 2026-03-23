@@ -146,6 +146,10 @@ class HotStandbyService {
     // Inject a snapshot provider (from external snapshot implementation).
     void SetSnapshotProvider(std::unique_ptr<SnapshotProvider> provider);
 
+    // Export snapshot segments for promoted Master to restore SegmentManager
+    bool ExportSnapshotSegments(
+        std::vector<std::pair<Segment, UUID>>& out) const;
+
     /**
      * @brief Get current state from state machine
      */
@@ -254,6 +258,9 @@ class HotStandbyService {
 
     // Synchronization
     mutable std::mutex mutex_;
+
+    // Segments from snapshot, preserved for promote path
+    std::vector<std::pair<Segment, UUID>> snapshot_segments_;
 };
 
 }  // namespace mooncake

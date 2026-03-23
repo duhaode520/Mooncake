@@ -237,8 +237,7 @@ TEST_F(SnapshotChildProcessTest, CleanupOldSnapshot_KeepsRecentDeletesOld) {
     for (auto it = snapshot_ids.rbegin(); it != snapshot_ids.rend(); ++it) {
         index_content += *it + "\n";
     }
-    backend->UploadString("mooncake_master_snapshot/index.txt",
-                          index_content);
+    backend->UploadString("mooncake_master_snapshot/index.txt", index_content);
 
     // Keep only 2, cleanup with current snapshot_id = last one
     CallCleanupOldSnapshot(2, "20240105_000000_000");
