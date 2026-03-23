@@ -346,14 +346,14 @@ void MasterServiceSupervisor::StartStandbyService(
               << ", enable_snapshot_restore_ignored=1";
 
     // Inject a snapshot provider matching the configured backend.
-    // MasterService uses SNAPSHOT_ROOT="master_snapshot".
+    // MasterService uses SNAPSHOT_ROOT="mooncake_master_snapshot".
     standby_service_ = std::make_unique<HotStandbyService>(standby_config);
     standby_service_->SetSnapshotProvider(
         std::make_unique<SerializerBackendSnapshotProvider>(
             /*backend_type=*/config_.snapshot_backend_type,
             /*etcd_endpoints=*/config_.etcd_endpoints,
             /*memory_allocator_type=*/config_.memory_allocator,
-            /*snapshot_root=*/"master_snapshot"));
+            /*snapshot_root=*/"mooncake_master_snapshot"));
 
     ErrorCode err = standby_service_->Start(
         current_leader, config_.etcd_endpoints, config_.cluster_id);

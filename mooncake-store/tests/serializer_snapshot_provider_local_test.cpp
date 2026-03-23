@@ -35,13 +35,13 @@ class SerializerSnapshotProviderLocalTest
         std::filesystem::remove_all(snapshot_local_path_, ec);
         std::filesystem::create_directories(snapshot_local_path_, ec);
 
-        ::setenv("SNAPSHOT_LOCAL_PATH", snapshot_local_path_.c_str(), 1);
+        ::setenv("MOONCAKE_SNAPSHOT_LOCAL_PATH", snapshot_local_path_.c_str(), 1);
     }
 
     void TearDown() override {
         service_.reset();
 
-        ::unsetenv("SNAPSHOT_LOCAL_PATH");
+        ::unsetenv("MOONCAKE_SNAPSHOT_LOCAL_PATH");
 
         std::error_code ec;
         std::filesystem::remove_all(snapshot_local_path_, ec);
@@ -58,7 +58,7 @@ TEST_F(SerializerSnapshotProviderLocalTest,
         MasterServiceConfig::builder()
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-            .set_enable_snapshot(false)
+            .set_enable_snapshot(true)
             .build();
 
     service_.reset(new MasterService(service_config));
@@ -105,7 +105,7 @@ TEST_F(SerializerSnapshotProviderLocalTest,
         MasterServiceConfig::builder()
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::LOCAL_FILE)
-            .set_enable_snapshot(false)
+            .set_enable_snapshot(true)
             .build();
 
     service_.reset(new MasterService(service_config));

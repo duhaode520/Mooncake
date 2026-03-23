@@ -160,13 +160,13 @@ class HaRecoveryIntegrationTest
             mock_snapshot_ = std::make_shared<MockSnapshotProvider>();
         } else if (config.snapshot_backend == "local") {
             // LOCAL_FILE snapshot backend — no etcd required
-            snapshot_root_ = "master_snapshot";
+            snapshot_root_ = "mooncake_master_snapshot";
             static std::atomic<int> snap_counter{0};
             localfs_snapshot_dir_ = "/tmp/ha_recovery_snap_" +
                                     std::to_string(getpid()) + "_" +
                                     std::to_string(snap_counter.fetch_add(1));
             std::filesystem::create_directories(localfs_snapshot_dir_);
-            setenv("SNAPSHOT_LOCAL_PATH", localfs_snapshot_dir_.c_str(), 1);
+            setenv("MOONCAKE_SNAPSHOT_LOCAL_PATH", localfs_snapshot_dir_.c_str(), 1);
             auto backend_type =
                 ParseSnapshotBackendType(config.snapshot_backend);
             snapshot_write_backend_ =
@@ -174,9 +174,9 @@ class HaRecoveryIntegrationTest
             ASSERT_NE(snapshot_write_backend_, nullptr);
         } else {
 #ifdef STORE_USE_ETCD
-            // Real backends use "master_snapshot" root (matches
+            // Real backends use "mooncake_master_snapshot" root (matches
             // MasterService::SNAPSHOT_ROOT used by RestoreState)
-            snapshot_root_ = "master_snapshot";
+            snapshot_root_ = "mooncake_master_snapshot";
             auto backend_type =
                 ParseSnapshotBackendType(config.snapshot_backend);
             snapshot_write_backend_ =
@@ -209,7 +209,7 @@ class HaRecoveryIntegrationTest
                 LOG(WARNING) << "Failed to remove snapshot dir "
                              << localfs_snapshot_dir_ << ": " << ec.message();
             }
-            unsetenv("SNAPSHOT_LOCAL_PATH");
+            unsetenv("MOONCAKE_SNAPSHOT_LOCAL_PATH");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         test_lock_.reset();
@@ -354,7 +354,7 @@ class HaRecoveryIntegrationTest
         auto cfg = MasterServiceConfig::builder()
                        .set_enable_ha(false)
                        .set_memory_allocator(BufferAllocatorType::OFFSET)
-                       .set_enable_snapshot(false)
+                       .set_enable_snapshot(true)
                        .set_enable_snapshot_restore(false)
                        .set_snapshot_backend_type(backend_type)
                        .set_etcd_endpoints(etcd_ep)

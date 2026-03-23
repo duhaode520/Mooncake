@@ -419,7 +419,7 @@ void LoadConfigFromCmdline(mooncake::MasterConfig& master_config,
         !conf_set) {
         master_config.etcd_endpoints = FLAGS_etcd_endpoints;
     }
-    if ((google::GetCommandLineFlagInfo("client_live_ttl_sec", &info) &&
+    if ((google::GetCommandLineFlagInfo("client_ttl", &info) &&
          !info.is_default) ||
         !conf_set) {
         master_config.client_live_ttl_sec = FLAGS_client_ttl;
@@ -640,10 +640,11 @@ int main(int argc, char* argv[]) {
 
     //     // HA mode snapshot backend policy:
     //     // - All snapshot data must be shared by all nodes.
-    //     // - Enforce ETCD backend; ignore `--snapshot_backend` or config file.
-    //     if (master_config.snapshot_backend_type != "etcd" &&
+    //     // - Enforce ETCD backend; ignore `--snapshot_backend` or config
+    //     file. if (master_config.snapshot_backend_type != "etcd" &&
     //         master_config.snapshot_backend_type != "ETCD") {
-    //         LOG(WARNING) << "snapshot_backend is ignored in HA mode; forcing "
+    //         LOG(WARNING) << "snapshot_backend is ignored in HA mode; forcing
+    //         "
     //                         "it to 'etcd' (was: "
     //                      << master_config.snapshot_backend_type << ")";
     //     }

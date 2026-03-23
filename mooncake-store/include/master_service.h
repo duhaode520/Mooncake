@@ -476,7 +476,27 @@ class MasterService {
 
     void SnapshotThreadFunc();
 
-    // Persist master state
+    // Snapshot serialized data bundle, produced by SerializeState()
+    struct SnapshotData {
+        std::vector<uint8_t> metadata;
+        std::vector<uint8_t> segments;
+        std::vector<uint8_t> task_manager;
+        uint64_t seq_id = 0;
+    };
+
+    // Phase 1: Serialize state into SnapshotData.
+    // When hold_lock=true (default), acquires snapshot_mutex_ during
+    // serialization. Set hold_lock=false in forked child processes where
+    // the mutex is already held and COW memory is immutable.
+    tl::expected<SnapshotData, SerializationError> SerializeState(
+        const std::string& snapshot_id, bool hold_lock = true);
+
+    // Phase 2: Pure I/O upload (no locks, safe to call from forked child)
+    tl::expected<void, SerializationError> UploadSnapshot(
+        const std::string& snapshot_id, SnapshotData snapshot_data);
+
+    // Convenience: SerializeState + UploadSnapshot in one call
+    // (for parent-process-only paths like ETCD daemon mode)
     tl::expected<void, SerializationError> PersistState(
         const std::string& snapshot_id, uint64_t* out_seq_id = nullptr);
 
@@ -969,6 +989,11 @@ class MasterService {
 
     std::thread snapshot_thread_;
     std::atomic<bool> snapshot_running_{false};
+
+    // Used to wake snapshot thread immediately during shutdown.
+    std::mutex snapshot_thread_mutex_;
+    std::condition_variable snapshot_thread_cv_;
+
     // Task cleanup thread related members
     std::thread task_cleanup_thread_;
     std::atomic<bool> task_cleanup_running_{false};
@@ -1225,7 +1250,8 @@ class MasterService {
     uint64_t snapshot_child_timeout_seconds_ =
         DEFAULT_SNAPSHOT_CHILD_TIMEOUT_SEC;
     uint32_t snapshot_retention_count_ = DEFAULT_SNAPSHOT_RETENTION_COUNT;
-    SnapshotBackendType snapshot_backend_type_ = SnapshotBackendType::LOCAL_FILE;
+    SnapshotBackendType snapshot_backend_type_ =
+        SnapshotBackendType::LOCAL_FILE;
     std::unique_ptr<SerializerBackend> snapshot_backend_;
     std::string etcd_endpoints_;
     mutable std::shared_mutex snapshot_mutex_;

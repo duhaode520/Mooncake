@@ -83,7 +83,7 @@ class SnapshotEtcdTest : public MasterServiceSnapshotTestBase {
     // Verify snapshot exists in etcd
     bool SnapshotExistsInEtcd(const std::string& snapshot_id) {
         std::string manifest_key =
-            "master_snapshot/" + snapshot_id + "/manifest.txt";
+            "mooncake_master_snapshot/" + snapshot_id + "/manifest.txt";
         std::string value;
         EtcdRevisionId revision;
         auto result = EtcdHelper::Get(manifest_key.c_str(), manifest_key.size(),
@@ -93,7 +93,7 @@ class SnapshotEtcdTest : public MasterServiceSnapshotTestBase {
 
     // Get latest snapshot ID from etcd
     std::string GetLatestSnapshotFromEtcd() {
-        std::string latest_key = "master_snapshot/latest.txt";
+        std::string latest_key = "mooncake_master_snapshot/latest.txt";
         std::string value;
         EtcdRevisionId revision;
         auto result = EtcdHelper::Get(latest_key.c_str(), latest_key.size(),
@@ -242,7 +242,7 @@ TEST_F(SnapshotEtcdTest, BasicSnapshotRestore) {
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::ETCD)
             .set_etcd_endpoints(FLAGS_etcd_endpoints)
-            .set_enable_snapshot(false)  // Manual snapshot control
+            .set_enable_snapshot(true)  // Manual snapshot control
             .build();
 
     service_.reset(new MasterService(service_config));
@@ -278,7 +278,7 @@ TEST_F(SnapshotEtcdTest, SnapshotPersistViaDaemon) {
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::ETCD)
             .set_etcd_endpoints(FLAGS_etcd_endpoints)
-            .set_enable_snapshot(false)  // Avoid snapshot thread
+            .set_enable_snapshot(true)  // Avoid snapshot thread
             .build();
 
     service_.reset(new MasterService(service_config));
@@ -318,10 +318,10 @@ TEST_F(SnapshotEtcdTest, SnapshotPersistViaDaemon) {
 
     // Fetch manifest/latest/metadata/segments from etcd
     std::string manifest_key =
-        "master_snapshot/" + snapshot_id + "/manifest.txt";
-    std::string metadata_key = "master_snapshot/" + snapshot_id + "/metadata";
-    std::string segments_key = "master_snapshot/" + snapshot_id + "/segments";
-    std::string latest_key = "master_snapshot/latest.txt";
+        "mooncake_master_snapshot/" + snapshot_id + "/manifest.txt";
+    std::string metadata_key = "mooncake_master_snapshot/" + snapshot_id + "/metadata";
+    std::string segments_key = "mooncake_master_snapshot/" + snapshot_id + "/segments";
+    std::string latest_key = "mooncake_master_snapshot/latest.txt";
 
     std::string manifest_value;
     ASSERT_TRUE(GetEtcdValue(manifest_key, manifest_value))
@@ -417,7 +417,7 @@ TEST_F(SnapshotEtcdTest, SnapshotPersistViaDaemon) {
 //                               .set_snapshot_backend_type(SnapshotBackendType::ETCD)
 //                               .set_etcd_endpoints(FLAGS_etcd_endpoints)
 //                               .set_client_live_ttl_sec(120)
-//                               .set_enable_snapshot(false)
+//                               .set_enable_snapshot(true)
 //                               .build();
 
 //     service_.reset(new MasterService(service_config));
@@ -524,7 +524,7 @@ TEST_F(SnapshotEtcdTest, SnapshotWithMultipleSegments) {
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::ETCD)
             .set_etcd_endpoints(FLAGS_etcd_endpoints)
-            .set_enable_snapshot(false)
+            .set_enable_snapshot(true)
             .build();
 
     service_.reset(new MasterService(service_config));
@@ -566,7 +566,7 @@ TEST_F(SnapshotEtcdTest, SnapshotWithEviction) {
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::ETCD)
             .set_etcd_endpoints(FLAGS_etcd_endpoints)
-            .set_enable_snapshot(false)
+            .set_enable_snapshot(true)
             .build();
 
     service_.reset(new MasterService(service_config));
@@ -601,7 +601,7 @@ TEST_F(SnapshotEtcdTest, RestoreEmptySnapshot) {
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::ETCD)
             .set_etcd_endpoints(FLAGS_etcd_endpoints)
-            .set_enable_snapshot(false)
+            .set_enable_snapshot(true)
             .build();
 
     service_.reset(new MasterService(service_config));
@@ -637,7 +637,7 @@ TEST_F(SnapshotEtcdTest, MultipleSnapshotVersions) {
             .set_memory_allocator(BufferAllocatorType::OFFSET)
             .set_snapshot_backend_type(SnapshotBackendType::ETCD)
             .set_etcd_endpoints(FLAGS_etcd_endpoints)
-            .set_enable_snapshot(false)
+            .set_enable_snapshot(true)
             .build();
 
     service_.reset(new MasterService(service_config));

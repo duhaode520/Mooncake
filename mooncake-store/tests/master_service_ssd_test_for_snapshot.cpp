@@ -370,7 +370,8 @@ TEST_F(MasterServiceSSDSnapshotTest, PutStartExpires) {
         // replica.
         put_start_result =
             service_->PutStart(client_id, key, slice_length, config);
-        EXPECT_FALSE(put_start_result.has_value());
+        ASSERT_FALSE(put_start_result.has_value())
+            << "Expected PutStart to fail with OBJECT_ALREADY_EXISTS";
         EXPECT_EQ(put_start_result.error(), ErrorCode::OBJECT_ALREADY_EXISTS);
 
         // Wait for a while until the discarded replicas are released.

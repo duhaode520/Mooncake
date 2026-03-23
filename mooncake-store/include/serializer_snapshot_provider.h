@@ -12,16 +12,16 @@ namespace mooncake {
 // SnapshotProvider implementation backed by SerializerBackend.
 //
 // It follows the snapshot layout used by MasterService:
-//   master_snapshot/latest.txt
-//   master_snapshot/<snapshot_id>/manifest.txt
-//   master_snapshot/<snapshot_id>/metadata
+//   mooncake_master_snapshot/latest.txt
+//   mooncake_master_snapshot/<snapshot_id>/manifest.txt
+//   mooncake_master_snapshot/<snapshot_id>/metadata
 // (and parses manifest[9] as oplog_seq_id when present)
 class SerializerBackendSnapshotProvider final : public SnapshotProvider {
    public:
     SerializerBackendSnapshotProvider(
         SnapshotBackendType backend_type, const std::string& etcd_endpoints,
         BufferAllocatorType memory_allocator_type = BufferAllocatorType::OFFSET,
-        std::string snapshot_root = "master_snapshot");
+        std::string snapshot_root = "mooncake_master_snapshot");
 
     bool LoadLatestSnapshot(
         const std::string& cluster_id, std::string& snapshot_id,
