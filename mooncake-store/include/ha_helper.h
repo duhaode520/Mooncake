@@ -51,6 +51,9 @@ class MasterViewHelper {
 
     /*
      * @brief Elect the master to be the leader. This is a blocking function.
+     *        Blocks until this node wins the election via etcd CAS.
+     *        If another leader exists, watches until it disappears, then
+     *        retries.
      * @param master_address: The ip:port address of the master to be elected.
      * @param version: Output param, the version of the new master view.
      * @param lease_id: Output param, the lease id of the leader.
@@ -94,12 +97,18 @@ class MasterServiceSupervisor {
 
    private:
     /**
-     * @brief Start HotStandbyService when there is an existing leader
-     * @param mv_helper MasterViewHelper instance
-     * @param current_leader Current leader address
+     * @brief Unconditionally start HotStandbyService for oplog recovery.
+     *        Called before leader election (All-Standby-First pattern).
+     * @return ErrorCode::OK on success, error code on failure.
      */
-    void StartStandbyService(MasterViewHelper& mv_helper,
-                             const std::string& current_leader);
+    ErrorCode StartStandbyService();
+
+    /**
+     * @brief Wait for Standby service to be ready (reached WATCHING state).
+     *        Currently a no-op since HotStandbyService::Start() is synchronous.
+     *        Reserved for future async Start mode.
+     */
+    void WaitForStandbyReady();
 
     /**
      * @brief Stop HotStandbyService
